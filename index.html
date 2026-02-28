@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<!--
+  ═══════════════════════════════════════════════════════════════
+  CRIME SCENE — A Deductive Mystery Game (v2 — AI Agents)
+  ═══════════════════════════════════════════════════════════════
+
+  HOW TO RUN:
+    Open this file in any modern browser. No server required.
+    For AI-powered suspects, configure an API key in the setup screen.
+    Without an API key, the game uses an advanced fallback engine.
+
+  AI PROVIDERS SUPPORTED:
+    - OpenAI (gpt-4o-mini, gpt-4o, etc.)
+    - Groq (llama, mixtral, etc.)
+    - Ollama (local, free — run ollama serve first)
+    - Any OpenAI-compatible API (custom base URL)
+
+  GAMEPLAY:
+    1. Configure suspects count, seed, and optionally an LLM provider.
+    2. Click "Start Case" to generate the mystery.
+    3. Click a suspect to interrogate them.
+    4. Type free-text questions OR use the quick-action buttons.
+    5. Cross-reference alibis, evidence, and witness statements.
+    6. Accuse when confident.
+  ═══════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crime Scene — Detective Mystery Game</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ═══ SETUP SCREEN ═══ -->
+  <div id="setup-screen">
+    <div class="setup-box">
+      <h1>&#128270; Crime Scene</h1>
+      <p class="subtitle">A Deductive Mystery Game</p>
+
+      <div class="field">
+        <label for="suspect-count">Number of Suspects</label>
+        <select id="suspect-count">
+          <option value="3">3 Suspects</option>
+          <option value="4" selected>4 Suspects</option>
+          <option value="5">5 Suspects</option>
+          <option value="6">6 Suspects</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="seed-input">Case Seed (optional)</label>
+        <input type="text" id="seed-input" placeholder="Leave blank for random">
+      </div>
+
+      <button class="btn btn-primary" id="btn-start">Start Case</button>
+    </div>
+  </div>
+
+  <!-- ═══ GAME SCREEN ═══ -->
+  <div id="game-screen">
+    <div class="game-layout">
+
+      <!-- Header -->
+      <div class="game-header">
+        <h2 id="header-case-info">Case #------</h2>
+        <div class="header-actions">
+          <button class="btn btn-sm btn-outline" id="btn-debug-toggle">Debug</button>
+          <button class="btn btn-sm btn-outline" id="btn-new-case">New Case</button>
+        </div>
+      </div>
+
+      <!-- Left: Suspect list -->
+      <div class="panel left-panel">
+        <div class="panel-title">Suspects</div>
+        <div class="panel-body">
+          <ul class="suspect-list" id="suspect-list"></ul>
+        </div>
+        <!-- Suspect emotional state -->
+        <div class="suspect-state-panel" id="suspect-state"></div>
+      </div>
+
+      <!-- Center: Case summary + Interrogation -->
+      <div class="center-col">
+
+        <!-- Case summary -->
+        <div class="panel" style="flex-shrink:0">
+          <div class="panel-title">Case Summary</div>
+          <div class="case-summary-body">
+            <div class="case-fact"><strong>Victim</strong><span id="case-victim">—</span></div>
+            <div class="case-fact"><strong>Time of Death</strong><span id="case-time">—</span></div>
+            <div class="case-fact"><strong>Location</strong><span id="case-location">—</span></div>
+            <div class="case-fact"><strong>Weapon</strong><span id="case-weapon">—</span></div>
+            <ul class="evidence-list" id="evidence-list"></ul>
+          </div>
+        </div>
+
+        <!-- Interrogation -->
+        <div class="panel interrogation-panel">
+          <div class="panel-title">Interrogation Room</div>
+
+          <div class="interrogation-controls" id="interrogation-controls" style="display:none">
+            <button class="btn btn-sm btn-outline" id="btn-ask-alibi" title="Ask about their alibi at murder time">Alibi</button>
+            <button class="btn btn-sm btn-outline" id="btn-ask-victim" title="Ask about the victim">Victim</button>
+
+            <select id="select-about-suspect" title="Choose a suspect to ask about"></select>
+            <button class="btn btn-sm btn-outline" id="btn-ask-about" title="Ask about another suspect">Ask about</button>
+
+            <select id="select-time" title="Choose a time period"></select>
+            <button class="btn btn-sm btn-outline" id="btn-ask-time" title="Ask where they were at this time">Where?</button>
+
+            <button class="btn btn-sm btn-outline" id="btn-ask-shoes" title="Ask their shoe size">Shoes</button>
+            <button class="btn btn-sm btn-outline" id="btn-ask-item" title="Ask about their personal item">Item</button>
+            <button class="btn btn-sm btn-outline btn-confront" id="btn-ask-confront" title="Confront with evidence">Confront</button>
+            <button class="btn btn-sm btn-outline btn-pressure" id="btn-ask-secret" title="Pressure for secrets">Pressure</button>
+          </div>
+
+          <div class="chat-log" id="chat-log"></div>
+
+          <!-- Free text input -->
+          <div class="chat-input-bar">
+            <input type="text" id="chat-input" placeholder="Type your question... (or use buttons above)" autocomplete="off">
+            <button class="btn btn-sm btn-primary" id="btn-send">Send</button>
+          </div>
+
+          <!-- Accuse bar -->
+          <div class="accuse-bar">
+            <select id="select-accuse"></select>
+            <button class="btn btn-sm btn-danger" id="btn-accuse">Accuse!</button>
+            <button class="btn btn-sm btn-outline" id="btn-reveal" title="Reveal the solution">Reveal</button>
+          </div>
+        </div>
+
+        <!-- Debug panel -->
+        <div class="debug-panel" id="debug-panel" style="display:none"></div>
+      </div>
+
+      <!-- Right: Notes -->
+      <div class="panel">
+        <div class="panel-title">Inspector's Notes</div>
+        <div class="panel-body notes-body" id="notes-log"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Load order: config → engine (game logic) → agent (AI) → app (UI) -->
+  <script src="config.js"></script>
+  <script src="engine.js"></script>
+  <script src="agent.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

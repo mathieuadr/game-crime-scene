@@ -1,0 +1,4 @@
+{"sessionId":"e97670","location":"app.js:top","message":"app.js loaded","data":{"configExists":true},"timestamp":1772293789069,"hypothesisId":"H2"}
+{"sessionId":"e97670","location":"app.js:initUI","message":"initUI called","data":{"btnStartExists":true},"timestamp":1772293789072,"hypothesisId":"H1"}
+{"sessionId":"e97670","location":"app.js:initUI:end","message":"initUI completed","data":{"buttonsWired":true},"timestamp":1772293789073,"hypothesisId":"H1,H3"}
+{"sessionId":"e97670","location":"app.js:startGame","message":"startGame called","data":{},"timestamp":1772293790283,"hypothesisId":"H1"}
