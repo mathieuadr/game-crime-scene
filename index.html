@@ -1,27 +1,22 @@
 <!DOCTYPE html>
 <!--
   ═══════════════════════════════════════════════════════════════
-  CRIME SCENE — A Deductive Mystery Game (v2 — AI Agents)
+  CRIME SCENE — A Deductive Mystery Game (v3 — Modular)
   ═══════════════════════════════════════════════════════════════
 
   HOW TO RUN:
-    Open this file in any modern browser. No server required.
-    For AI-powered suspects, configure an API key in the setup screen.
-    Without an API key, the game uses an advanced fallback engine.
+    Serve this folder with any local server, then open in a browser.
+    Examples:
+      python3 -m http.server 8000
+      npx serve .
+      VS Code Live Server extension
 
-  AI PROVIDERS SUPPORTED:
-    - OpenAI (gpt-4o-mini, gpt-4o, etc.)
-    - Groq (llama, mixtral, etc.)
-    - Ollama (local, free — run ollama serve first)
-    - Any OpenAI-compatible API (custom base URL)
+  AI SERVICES (all optional, game works without any):
+    - LLM (Mistral/OpenAI/Groq/Ollama) — AI-powered suspect dialogues
+    - fal.ai — Generate crime scene, weapon, and portrait images
+    - ElevenLabs — Give each suspect a voice
 
-  GAMEPLAY:
-    1. Configure suspects count, seed, and optionally an LLM provider.
-    2. Click "Start Case" to generate the mystery.
-    3. Click a suspect to interrogate them.
-    4. Type free-text questions OR use the quick-action buttons.
-    5. Cross-reference alibis, evidence, and witness statements.
-    6. Accuse when confident.
+  Configure API keys in config.js (gitignored).
   ═══════════════════════════════════════════════════════════════
 -->
 <html lang="en">
@@ -54,7 +49,33 @@
         <input type="text" id="seed-input" placeholder="Leave blank for random">
       </div>
 
+      <div class="field">
+        <label>Story Generation</label>
+        <div class="story-mode-toggle">
+          <button type="button" class="mode-btn active" data-mode="classic">Classic</button>
+          <button type="button" class="mode-btn" data-mode="ai">AI Generated</button>
+        </div>
+        <p class="field-hint" id="story-mode-hint">Procedural story from built-in data pools.</p>
+      </div>
+
+      <div id="ai-theme-field" class="field" style="display:none">
+        <label for="ai-theme">Story Theme (optional)</label>
+        <input type="text" id="ai-theme" placeholder="e.g. 1920s jazz club, space station, medieval castle…">
+      </div>
+
+      <!-- Service status indicators -->
+      <div id="service-status" class="service-status"></div>
+
       <button class="btn btn-primary" id="btn-start">Start Case</button>
+    </div>
+  </div>
+
+  <!-- ═══ LOADING OVERLAY (AI generation) ═══ -->
+  <div id="loading-overlay" style="display:none">
+    <div class="loading-box">
+      <div class="loading-spinner"></div>
+      <h3>Generating story...</h3>
+      <p class="loading-sub" id="loading-status">The AI is crafting your mystery. This may take a moment.</p>
     </div>
   </div>
 
@@ -66,6 +87,8 @@
       <div class="game-header">
         <h2 id="header-case-info">Case #------</h2>
         <div class="header-actions">
+          <span id="active-services"></span>
+          <button class="btn btn-sm btn-outline" id="btn-voice-toggle" title="Toggle auto-voice">&#128264; Voice</button>
           <button class="btn btn-sm btn-outline" id="btn-debug-toggle">Debug</button>
           <button class="btn btn-sm btn-outline" id="btn-new-case">New Case</button>
         </div>
@@ -77,7 +100,6 @@
         <div class="panel-body">
           <ul class="suspect-list" id="suspect-list"></ul>
         </div>
-        <!-- Suspect emotional state -->
         <div class="suspect-state-panel" id="suspect-state"></div>
       </div>
 
@@ -93,6 +115,11 @@
             <div class="case-fact"><strong>Location</strong><span id="case-location">—</span></div>
             <div class="case-fact"><strong>Weapon</strong><span id="case-weapon">—</span></div>
             <ul class="evidence-list" id="evidence-list"></ul>
+          </div>
+          <!-- AI-generated images -->
+          <div class="case-images">
+            <div id="crime-scene-image" class="image-slot"></div>
+            <div id="weapon-image" class="image-slot"></div>
           </div>
         </div>
 
@@ -118,13 +145,12 @@
 
           <div class="chat-log" id="chat-log"></div>
 
-          <!-- Free text input -->
           <div class="chat-input-bar">
-            <input type="text" id="chat-input" placeholder="Type your question... (or use buttons above)" autocomplete="off">
+            <button class="btn btn-sm btn-outline btn-mic" id="btn-mic" title="Hold to speak (Speech-to-Text)">&#127908;</button>
+            <input type="text" id="chat-input" placeholder="Type or speak your question..." autocomplete="off">
             <button class="btn btn-sm btn-primary" id="btn-send">Send</button>
           </div>
 
-          <!-- Accuse bar -->
           <div class="accuse-bar">
             <select id="select-accuse"></select>
             <button class="btn btn-sm btn-danger" id="btn-accuse">Accuse!</button>
@@ -145,10 +171,8 @@
     </div>
   </div>
 
-  <!-- Load order: config → engine (game logic) → agent (AI) → app (UI) -->
+  <!-- Load order: config (global) → ES module entry point -->
   <script src="config.js"></script>
-  <script src="engine.js"></script>
-  <script src="agent.js"></script>
-  <script src="app.js"></script>
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>

@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<!--
+  ElevenLabs + Speech-to-Text — Standalone Test Page
+  Delete this file once everything works in the main project.
+
+  IMPORTANT: You MUST access via http://localhost:8000 (not 127.0.0.1, not [::])
+  for the microphone / Speech-to-Text to work.
+
+  Run: python3 -m http.server 8000 --bind localhost
+  Open: http://localhost:8000/test-elevenlabs.html
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ElevenLabs + STT Test</title>
+  <style>
+    :root { --bg: #1a1a2e; --card: #16213e; --border: #2a3a5e; --accent: #e94560; --text: #eee; --dim: #8899aa; --success: #4ade80; --danger: #ef4444; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
+    h1 { font-size: 1.4rem; margin-bottom: .3rem; }
+    h2 { font-size: 1rem; margin-bottom: .6rem; color: var(--accent); }
+    .subtitle { color: var(--dim); font-size: .85rem; margin-bottom: 2rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    label { display: block; font-size: .8rem; color: var(--dim); margin-bottom: .3rem; }
+    input, select, textarea { width: 100%; padding: .5rem .7rem; background: #0f3460; border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: .85rem; outline: none; margin-bottom: .8rem; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 60px; }
+    button { padding: .5rem 1rem; border: none; border-radius: 6px; font-size: .85rem; font-weight: 600; cursor: pointer; transition: .2s; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #c73a52; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-outline:hover:not(:disabled) { background: #0f3460; }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-mic { width: 48px; height: 48px; border-radius: 50%; font-size: 1.3rem; display: inline-flex; align-items: center; justify-content: center; }
+    .btn-mic.active { background: var(--danger); box-shadow: 0 0 0 4px rgba(239,68,68,.3); animation: pulse 1.2s infinite; }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 0 4px rgba(239,68,68,.3); } 50% { box-shadow: 0 0 0 8px rgba(239,68,68,.1); } }
+    .log { background: #0a0a1a; border: 1px solid #333; border-radius: 6px; padding: .6rem; font-family: monospace; font-size: .75rem; max-height: 200px; overflow-y: auto; white-space: pre-wrap; color: #aaffaa; margin-top: .6rem; }
+    .status { font-size: .8rem; padding: .4rem .6rem; border-radius: 4px; margin-bottom: .8rem; }
+    .status-ok { background: rgba(74,222,128,.15); color: var(--success); }
+    .status-err { background: rgba(239,68,68,.15); color: var(--danger); }
+    .status-wait { background: rgba(251,191,36,.15); color: #fbbf24; }
+    .row { display: flex; gap: .8rem; align-items: flex-start; }
+    .row > * { flex: 1; }
+    .voice-item { display: flex; align-items: center; gap: .5rem; padding: .4rem; border-radius: 4px; cursor: pointer; font-size: .8rem; }
+    .voice-item:hover { background: #0f3460; }
+    .voice-item.selected { background: #0f3460; border: 1px solid var(--accent); }
+    .voice-list { max-height: 200px; overflow-y: auto; margin-bottom: .8rem; }
+    .badge { font-size: .6rem; padding: .1rem .3rem; border-radius: 3px; background: rgba(255,255,255,.08); color: var(--dim); }
+    .flex-gap { display: flex; gap: .5rem; align-items: center; }
+    #stt-transcript { min-height: 50px; padding: .6rem; background: #0f3460; border: 1px solid var(--border); border-radius: 6px; font-size: .9rem; }
+  </style>
+</head>
+<body>
+
+  <h1>ElevenLabs + Speech-to-Text Test</h1>
+  <p class="subtitle">Standalone test page — delete once the main project works.</p>
+
+  <!-- ═══ 1. API Key ═══ -->
+  <div class="card">
+    <h2>1. ElevenLabs API Key</h2>
+    <label for="api-key">API Key (loaded from config.js)</label>
+    <input type="password" id="api-key" placeholder="sk_...">
+    <button class="btn-primary" id="btn-test-key">Test Connection</button>
+    <div id="key-status"></div>
+  </div>
+
+  <!-- ═══ 2. Voices ═══ -->
+  <div class="card">
+    <h2>2. Available Voices</h2>
+    <button class="btn-outline" id="btn-fetch-voices">Fetch Voices</button>
+    <div id="voice-status"></div>
+    <div class="voice-list" id="voice-list"></div>
+    <div id="voice-count" style="font-size:.75rem;color:var(--dim)"></div>
+  </div>
+
+  <!-- ═══ 3. Text-to-Speech ═══ -->
+  <div class="card">
+    <h2>3. Text-to-Speech (ElevenLabs)</h2>
+    <div id="tts-voice-info" class="status status-err" style="margin-bottom:.6rem">No voice selected — go to section 2 and click on a voice first.</div>
+    <label for="tts-text">Text to speak</label>
+    <textarea id="tts-text">Hello Inspector, I assure you I had nothing to do with this terrible incident.</textarea>
+    <label for="tts-model">Model</label>
+    <input type="text" id="tts-model" value="eleven_multilingual_v2">
+    <div class="flex-gap">
+      <button class="btn-primary" id="btn-speak" disabled>Speak (select a voice first)</button>
+      <button class="btn-outline" id="btn-stop-audio" disabled>Stop</button>
+    </div>
+    <div id="tts-status"></div>
+    <div class="log" id="tts-log"></div>
+  </div>
+
+  <!-- ═══ 4. Speech-to-Text ═══ -->
+  <div class="card">
+    <h2>4. Speech-to-Text (Web Speech API)</h2>
+    <div id="stt-support-status"></div>
+    <div class="flex-gap" style="margin-bottom:.8rem">
+      <button class="btn-outline btn-mic" id="btn-mic">&#127908;</button>
+      <div style="flex:1">
+        <div style="font-size:.8rem;color:var(--dim);margin-bottom:.3rem">Click the mic, then speak. Transcript appears below:</div>
+        <div id="stt-transcript">...</div>
+      </div>
+    </div>
+    <label for="stt-lang">Language</label>
+    <select id="stt-lang">
+      <option value="en-US">English (US)</option>
+      <option value="en-GB">English (UK)</option>
+      <option value="fr-FR">French</option>
+      <option value="es-ES">Spanish</option>
+      <option value="de-DE">German</option>
+    </select>
+    <div class="log" id="stt-log"></div>
+  </div>
+
+  <!-- ═══ 5. Full Round-Trip ═══ -->
+  <div class="card">
+    <h2>5. Round-Trip: Speak → Transcribe → TTS Reply</h2>
+    <p style="font-size:.82rem;color:var(--dim);margin-bottom:.8rem">
+      Click the mic to speak a question. Once transcribed, it will be sent as TTS with the selected voice.
+    </p>
+    <div class="flex-gap">
+      <button class="btn-primary btn-mic" id="btn-roundtrip">&#127908; Start</button>
+    </div>
+    <div id="roundtrip-status"></div>
+    <div class="log" id="roundtrip-log"></div>
+  </div>
+
+  <!-- ═══ 6. Voxtral STT (Mistral API) ═══ -->
+  <div class="card">
+    <h2>6. Speech-to-Text via Voxtral (Mistral API)</h2>
+    <p style="font-size:.82rem;color:var(--dim);margin-bottom:.8rem">
+      Records audio from your mic, then sends it to Mistral's Voxtral model for transcription.
+      Uses your Mistral API key — no browser STT dependency.
+    </p>
+    <label for="mistral-key">Mistral API Key (loaded from config.js)</label>
+    <input type="password" id="mistral-key" placeholder="Your Mistral API key">
+    <label for="voxtral-model">Voxtral Model</label>
+    <input type="text" id="voxtral-model" value="voxtral-mini-latest">
+    <label for="voxtral-lang">Language hint (optional, improves accuracy)</label>
+    <select id="voxtral-lang">
+      <option value="">Auto-detect</option>
+      <option value="en">English</option>
+      <option value="fr">French</option>
+      <option value="es">Spanish</option>
+      <option value="de">German</option>
+      <option value="it">Italian</option>
+      <option value="pt">Portuguese</option>
+      <option value="zh">Chinese</option>
+      <option value="ja">Japanese</option>
+      <option value="ko">Korean</option>
+    </select>
+    <div class="flex-gap" style="margin-bottom:.8rem">
+      <button class="btn-outline btn-mic" id="btn-voxtral-mic">&#127908;</button>
+      <button class="btn-danger" id="btn-voxtral-stop" disabled style="border-radius:50%;width:48px;height:48px;font-size:.7rem">Stop</button>
+      <div style="flex:1">
+        <div style="font-size:.8rem;color:var(--dim);margin-bottom:.3rem">Click mic to record, then Stop to transcribe:</div>
+        <div id="voxtral-transcript" style="min-height:50px;padding:.6rem;background:#0f3460;border:1px solid var(--border);border-radius:6px;font-size:.9rem">...</div>
+      </div>
+    </div>
+    <div id="voxtral-status"></div>
+    <div class="log" id="voxtral-log"></div>
+  </div>
+
+  <!-- ═══ 7. Full Round-Trip with Voxtral ═══ -->
+  <div class="card">
+    <h2>7. Round-Trip: Voxtral STT → ElevenLabs TTS</h2>
+    <p style="font-size:.82rem;color:var(--dim);margin-bottom:.8rem">
+      Record your voice → Voxtral transcribes it → ElevenLabs speaks the reply with the selected voice.
+    </p>
+    <div class="flex-gap">
+      <button class="btn-primary btn-mic" id="btn-roundtrip-voxtral">&#127908; Record</button>
+      <button class="btn-danger" id="btn-roundtrip-voxtral-stop" disabled style="border-radius:6px">Stop & Transcribe</button>
+    </div>
+    <div id="roundtrip-voxtral-status"></div>
+    <div class="log" id="roundtrip-voxtral-log"></div>
+  </div>
+
+  <!-- Load config.js to get the API key -->
+  <script src="config.js"></script>
+  <script>
+    // ─── Helpers ─────────────────────────────────────────────
+    const $ = id => document.getElementById(id);
+    function log(el, msg) { el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`; el.scrollTop = el.scrollHeight; }
+    function setStatus(el, cls, text) { el.innerHTML = `<div class="status ${cls}">${text}</div>`; }
+
+    // ─── State ──────────────────────────────────────────────
+    let voices = [];
+    let selectedVoiceId = null;
+    let currentAudio = null;
+
+    // Pre-fill API keys from config.js
+    const cfg = window.CRIME_SCENE_CONFIG || {};
+    $("api-key").value = cfg.elevenLabsApiKey || "";
+    $("tts-model").value = cfg.elevenLabsModel || "eleven_multilingual_v2";
+    $("mistral-key").value = cfg.apiKey || "";
+
+    // Warn if not on localhost (STT won't work)
+    if (location.hostname !== "localhost") {
+      const warn = document.createElement("div");
+      warn.className = "status status-err";
+      warn.style.cssText = "margin-bottom:1rem;font-size:.9rem;padding:.8rem";
+      warn.innerHTML = `<strong>Warning:</strong> You are accessing this page via <code>${location.hostname}</code>. Speech-to-Text requires <code>http://localhost:8000</code>. <a href="http://localhost:${location.port}/test-elevenlabs.html" style="color:var(--accent)">Click here to switch.</a>`;
+      document.body.insertBefore(warn, document.body.children[2]);
+    }
+
+    function getApiKey() { return $("api-key").value.trim(); }
+
+    // ═══ 1. Test API Key ════════════════════════════════════
+    $("btn-test-key").addEventListener("click", async () => {
+      const key = getApiKey();
+      if (!key) { setStatus($("key-status"), "status-err", "No API key entered."); return; }
+
+      setStatus($("key-status"), "status-wait", "Testing...");
+      try {
+        const res = await fetch("https://api.elevenlabs.io/v1/user", {
+          headers: { "xi-api-key": key },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setStatus($("key-status"), "status-ok",
+            `Connected! User: ${data.xi_api_key ? "valid key" : "unknown"} — Characters remaining: ${data.subscription?.character_count ?? "?"} / ${data.subscription?.character_limit ?? "?"}`
+          );
+        } else {
+          setStatus($("key-status"), "status-err", `API returned ${res.status}: ${await res.text()}`);
+        }
+      } catch (err) {
+        setStatus($("key-status"), "status-err", `Network error: ${err.message}`);
+      }
+    });
+
+    // ═══ 2. Fetch Voices ════════════════════════════════════
+    $("btn-fetch-voices").addEventListener("click", async () => {
+      const key = getApiKey();
+      if (!key) { setStatus($("voice-status"), "status-err", "Enter your API key first."); return; }
+
+      setStatus($("voice-status"), "status-wait", "Fetching voices...");
+      try {
+        const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+          headers: { "xi-api-key": key },
+        });
+        if (!res.ok) { setStatus($("voice-status"), "status-err", `Failed: ${res.status}`); return; }
+
+        const data = await res.json();
+        voices = data.voices || [];
+        $("voice-count").textContent = `${voices.length} voices available`;
+        setStatus($("voice-status"), "status-ok", `Fetched ${voices.length} voices.`);
+
+        const list = $("voice-list");
+        list.innerHTML = "";
+        voices.forEach(v => {
+          const labels = Object.entries(v.labels || {}).map(([k, val]) => `<span class="badge">${k}: ${val}</span>`).join(" ");
+          const div = document.createElement("div");
+          div.className = "voice-item";
+          div.innerHTML = `<strong>${v.name}</strong> ${labels}`;
+          div.addEventListener("click", () => {
+            selectedVoiceId = v.voice_id;
+            list.querySelectorAll(".voice-item").forEach(el => el.classList.remove("selected"));
+            div.classList.add("selected");
+            $("btn-speak").disabled = false;
+            $("btn-speak").textContent = `Speak as "${v.name}"`;
+            $("tts-voice-info").className = "status status-ok";
+            $("tts-voice-info").textContent = `Voice selected: ${v.name} (${v.voice_id})`;
+            log($("tts-log"), `Selected voice: ${v.name} (${v.voice_id})`);
+          });
+          list.appendChild(div);
+        });
+
+      } catch (err) {
+        setStatus($("voice-status"), "status-err", `Error: ${err.message}`);
+      }
+    });
+
+    // ═══ 3. Text-to-Speech ══════════════════════════════════
+    $("btn-speak").addEventListener("click", async () => {
+      const key = getApiKey();
+      const text = $("tts-text").value.trim();
+      if (!key || !selectedVoiceId || !text) return;
+
+      const ttsLog = $("tts-log");
+      $("btn-speak").disabled = true;
+      setStatus($("tts-status"), "status-wait", "Generating speech...");
+      log(ttsLog, `Sending TTS request: voice=${selectedVoiceId}, text="${text.slice(0, 50)}..."`);
+
+      try {
+        const startTime = performance.now();
+        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "xi-api-key": key,
+          },
+          body: JSON.stringify({
+            text,
+            model_id: $("tts-model").value,
+            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+          }),
+        });
+
+        const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+
+        if (!res.ok) {
+          const errText = await res.text();
+          setStatus($("tts-status"), "status-err", `TTS failed (${res.status}): ${errText}`);
+          log(ttsLog, `ERROR ${res.status}: ${errText}`);
+          $("btn-speak").disabled = false;
+          return;
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        log(ttsLog, `Audio received (${(blob.size / 1024).toFixed(1)} KB) in ${elapsed}s`);
+        setStatus($("tts-status"), "status-ok", `Speech generated in ${elapsed}s — playing...`);
+
+        stopAudio();
+        currentAudio = new Audio(url);
+        $("btn-stop-audio").disabled = false;
+        currentAudio.addEventListener("ended", () => {
+          log(ttsLog, "Playback finished.");
+          $("btn-stop-audio").disabled = true;
+          currentAudio = null;
+        });
+        currentAudio.play();
+        log(ttsLog, "Playing audio...");
+
+      } catch (err) {
+        setStatus($("tts-status"), "status-err", `Error: ${err.message}`);
+        log(ttsLog, `ERROR: ${err.message}`);
+      }
+      $("btn-speak").disabled = false;
+    });
+
+    $("btn-stop-audio").addEventListener("click", stopAudio);
+
+    function stopAudio() {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+        currentAudio = null;
+        $("btn-stop-audio").disabled = true;
+      }
+    }
+
+    // ═══ 4. Speech-to-Text (Web Speech API) ═════════════════
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setStatus($("stt-support-status"), "status-err", "Speech Recognition NOT supported in this browser. Use Chrome or Edge.");
+      $("btn-mic").disabled = true;
+      $("btn-roundtrip").disabled = true;
+    } else {
+      setStatus($("stt-support-status"), "status-ok", "Speech Recognition is supported.");
+    }
+
+    let recognition = null;
+    let sttActive = false;
+
+    function startSTT(onResult, onEnd) {
+      if (!SpeechRecognition) return;
+      stopCurrentSTT();
+
+      recognition = new SpeechRecognition();
+      recognition.lang = $("stt-lang").value;
+      recognition.continuous = false;
+      recognition.interimResults = true;
+
+      recognition.addEventListener("start", () => {
+        sttActive = true;
+        log($("stt-log"), `STT started (lang: ${recognition.lang})`);
+      });
+
+      recognition.addEventListener("result", (e) => {
+        const transcript = Array.from(e.results).map(r => r[0].transcript).join("");
+        const isFinal = e.results[e.results.length - 1].isFinal;
+        $("stt-transcript").textContent = transcript + (isFinal ? "" : " ...");
+        log($("stt-log"), `${isFinal ? "FINAL" : "interim"}: "${transcript}"`);
+        if (onResult) onResult(transcript, isFinal);
+      });
+
+      recognition.addEventListener("end", () => {
+        sttActive = false;
+        log($("stt-log"), "STT ended.");
+        if (onEnd) onEnd();
+      });
+
+      recognition.addEventListener("error", (e) => {
+        sttActive = false;
+        let hint = "";
+        if (e.error === "service-not-allowed") {
+          hint = " → Make sure you access this page via http://localhost:8000 (not 127.0.0.1 or [::])";
+        } else if (e.error === "not-allowed") {
+          hint = " → Microphone permission denied. Allow it in browser settings & macOS System Preferences > Privacy > Microphone";
+        } else if (e.error === "no-speech") {
+          hint = " → No speech detected. Try speaking louder or closer to the mic.";
+        }
+        log($("stt-log"), `STT error: ${e.error}${hint}`);
+        if (hint) setStatus($("stt-support-status"), "status-err", `Error: ${e.error}${hint}`);
+        if (onEnd) onEnd();
+      });
+
+      recognition.start();
+    }
+
+    function stopCurrentSTT() {
+      if (recognition) {
+        try { recognition.stop(); } catch (_) {}
+        recognition = null;
+        sttActive = false;
+      }
+    }
+
+    $("btn-mic").addEventListener("click", () => {
+      const btn = $("btn-mic");
+      if (sttActive) {
+        stopCurrentSTT();
+        btn.classList.remove("active");
+      } else {
+        btn.classList.add("active");
+        startSTT(null, () => btn.classList.remove("active"));
+      }
+    });
+
+    // ═══ 5. Round-Trip ══════════════════════════════════════
+    $("btn-roundtrip").addEventListener("click", () => {
+      const btn = $("btn-roundtrip");
+      const rtLog = $("roundtrip-log");
+
+      if (!selectedVoiceId) {
+        setStatus($("roundtrip-status"), "status-err", "Select a voice first (section 2).");
+        return;
+      }
+
+      if (sttActive) {
+        stopCurrentSTT();
+        btn.classList.remove("active");
+        btn.innerHTML = "&#127908; Start";
+        return;
+      }
+
+      btn.classList.add("active");
+      btn.innerHTML = "&#128308; Listening...";
+      setStatus($("roundtrip-status"), "status-wait", "Listening... speak now.");
+      log(rtLog, "--- Round-trip started ---");
+
+      startSTT(
+        async (transcript, isFinal) => {
+          if (!isFinal) return;
+
+          btn.classList.remove("active");
+          btn.innerHTML = "&#127908; Start";
+          log(rtLog, `You said: "${transcript}"`);
+          setStatus($("roundtrip-status"), "status-wait", `Transcribed: "${transcript}" — generating TTS reply...`);
+
+          const replyText = `You asked: ${transcript}. Well, Inspector, I can assure you that I have a perfectly reasonable explanation for that.`;
+          log(rtLog, `TTS reply: "${replyText}"`);
+
+          try {
+            const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "xi-api-key": getApiKey() },
+              body: JSON.stringify({
+                text: replyText,
+                model_id: $("tts-model").value,
+                voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+              }),
+            });
+
+            if (!res.ok) {
+              log(rtLog, `TTS error: ${res.status}`);
+              setStatus($("roundtrip-status"), "status-err", `TTS failed: ${res.status}`);
+              return;
+            }
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            log(rtLog, `Audio ready (${(blob.size / 1024).toFixed(1)} KB) — playing...`);
+            setStatus($("roundtrip-status"), "status-ok", "Playing response...");
+
+            stopAudio();
+            currentAudio = new Audio(url);
+            currentAudio.addEventListener("ended", () => {
+              log(rtLog, "Round-trip complete!");
+              setStatus($("roundtrip-status"), "status-ok", "Round-trip complete!");
+              currentAudio = null;
+            });
+            currentAudio.play();
+          } catch (err) {
+            log(rtLog, `Error: ${err.message}`);
+            setStatus($("roundtrip-status"), "status-err", err.message);
+          }
+        },
+        () => {
+          btn.classList.remove("active");
+          btn.innerHTML = "&#127908; Start";
+        }
+      );
+    });
+
+    // ═══ 6. Voxtral STT (Mistral API) ══════════════════════
+    let mediaRecorder = null;
+    let audioChunks = [];
+
+    function getMistralKey() { return $("mistral-key").value.trim(); }
+
+    async function startRecording() {
+      audioChunks = [];
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+
+      mediaRecorder.addEventListener("dataavailable", (e) => {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      });
+
+      mediaRecorder.start();
+      return stream;
+    }
+
+    function stopRecording() {
+      return new Promise((resolve) => {
+        if (!mediaRecorder || mediaRecorder.state === "inactive") { resolve(null); return; }
+        mediaRecorder.addEventListener("stop", () => {
+          const blob = new Blob(audioChunks, { type: "audio/webm" });
+          mediaRecorder.stream.getTracks().forEach(t => t.stop());
+          mediaRecorder = null;
+          audioChunks = [];
+          resolve(blob);
+        });
+        mediaRecorder.stop();
+      });
+    }
+
+    async function transcribeWithVoxtral(audioBlob, logEl) {
+      const key = getMistralKey();
+      if (!key) throw new Error("No Mistral API key.");
+
+      const model = $("voxtral-model").value || "voxtral-mini-latest";
+      const lang = $("voxtral-lang").value || undefined;
+
+      log(logEl, `Uploading audio (${(audioBlob.size / 1024).toFixed(1)} KB) to Voxtral...`);
+
+      const formData = new FormData();
+      formData.append("file", audioBlob, "recording.webm");
+      formData.append("model", model);
+      if (lang) formData.append("language", lang);
+
+      const startTime = performance.now();
+      const res = await fetch("https://api.mistral.ai/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${key}` },
+        body: formData,
+      });
+
+      const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Voxtral API ${res.status}: ${errText}`);
+      }
+
+      const data = await res.json();
+      log(logEl, `Transcribed in ${elapsed}s (model: ${data.model}, lang: ${data.language})`);
+      if (data.usage) {
+        log(logEl, `Usage: ${data.usage.prompt_audio_seconds}s audio → ${data.usage.completion_tokens} tokens`);
+      }
+      return data.text || "";
+    }
+
+    // Section 6: Record + Transcribe
+    let voxtralStream = null;
+
+    $("btn-voxtral-mic").addEventListener("click", async () => {
+      const btn = $("btn-voxtral-mic");
+      const stopBtn = $("btn-voxtral-stop");
+      const vLog = $("voxtral-log");
+
+      if (!getMistralKey()) {
+        setStatus($("voxtral-status"), "status-err", "Enter your Mistral API key first.");
+        return;
+      }
+
+      try {
+        btn.classList.add("active");
+        btn.disabled = true;
+        stopBtn.disabled = false;
+        $("voxtral-transcript").textContent = "Recording...";
+        setStatus($("voxtral-status"), "status-wait", "Recording — speak now, then click Stop.");
+        log(vLog, "Recording started...");
+
+        voxtralStream = await startRecording();
+      } catch (err) {
+        btn.classList.remove("active");
+        btn.disabled = false;
+        setStatus($("voxtral-status"), "status-err", `Mic error: ${err.message}`);
+        log(vLog, `ERROR: ${err.message}`);
+      }
+    });
+
+    $("btn-voxtral-stop").addEventListener("click", async () => {
+      const btn = $("btn-voxtral-mic");
+      const stopBtn = $("btn-voxtral-stop");
+      const vLog = $("voxtral-log");
+
+      stopBtn.disabled = true;
+      btn.classList.remove("active");
+      setStatus($("voxtral-status"), "status-wait", "Transcribing...");
+      log(vLog, "Recording stopped. Sending to Voxtral...");
+
+      try {
+        const blob = await stopRecording();
+        if (!blob || blob.size === 0) {
+          setStatus($("voxtral-status"), "status-err", "No audio recorded.");
+          btn.disabled = false;
+          return;
+        }
+
+        const text = await transcribeWithVoxtral(blob, vLog);
+        $("voxtral-transcript").textContent = text || "(no speech detected)";
+        log(vLog, `Result: "${text}"`);
+        setStatus($("voxtral-status"), "status-ok", `Transcription complete: "${text.slice(0, 80)}${text.length > 80 ? "..." : ""}"`);
+      } catch (err) {
+        setStatus($("voxtral-status"), "status-err", err.message);
+        log(vLog, `ERROR: ${err.message}`);
+      }
+
+      btn.disabled = false;
+    });
+
+    // ═══ 7. Round-Trip: Voxtral STT → ElevenLabs TTS ════════
+    let rtVoxtralRecording = false;
+
+    $("btn-roundtrip-voxtral").addEventListener("click", async () => {
+      const btn = $("btn-roundtrip-voxtral");
+      const stopBtn = $("btn-roundtrip-voxtral-stop");
+      const rtLog = $("roundtrip-voxtral-log");
+
+      if (!getMistralKey()) {
+        setStatus($("roundtrip-voxtral-status"), "status-err", "Enter your Mistral API key (section 6).");
+        return;
+      }
+      if (!selectedVoiceId) {
+        setStatus($("roundtrip-voxtral-status"), "status-err", "Select an ElevenLabs voice first (section 2).");
+        return;
+      }
+
+      try {
+        btn.classList.add("active");
+        btn.disabled = true;
+        stopBtn.disabled = false;
+        rtVoxtralRecording = true;
+        setStatus($("roundtrip-voxtral-status"), "status-wait", "Recording — speak your question, then click Stop.");
+        log(rtLog, "--- Voxtral round-trip started ---");
+
+        await startRecording();
+      } catch (err) {
+        btn.classList.remove("active");
+        btn.disabled = false;
+        setStatus($("roundtrip-voxtral-status"), "status-err", `Mic error: ${err.message}`);
+      }
+    });
+
+    $("btn-roundtrip-voxtral-stop").addEventListener("click", async () => {
+      const btn = $("btn-roundtrip-voxtral");
+      const stopBtn = $("btn-roundtrip-voxtral-stop");
+      const rtLog = $("roundtrip-voxtral-log");
+
+      stopBtn.disabled = true;
+      btn.classList.remove("active");
+      rtVoxtralRecording = false;
+
+      setStatus($("roundtrip-voxtral-status"), "status-wait", "Transcribing with Voxtral...");
+      log(rtLog, "Recording stopped. Transcribing...");
+
+      try {
+        const blob = await stopRecording();
+        if (!blob || blob.size === 0) {
+          setStatus($("roundtrip-voxtral-status"), "status-err", "No audio recorded.");
+          btn.disabled = false;
+          return;
+        }
+
+        const transcript = await transcribeWithVoxtral(blob, rtLog);
+        log(rtLog, `You said: "${transcript}"`);
+
+        if (!transcript) {
+          setStatus($("roundtrip-voxtral-status"), "status-err", "No speech detected.");
+          btn.disabled = false;
+          return;
+        }
+
+        setStatus($("roundtrip-voxtral-status"), "status-wait", `Transcribed: "${transcript}" — generating TTS reply...`);
+
+        const replyText = `You asked: ${transcript}. Well, Inspector, I can assure you that I have a perfectly reasonable explanation for that.`;
+        log(rtLog, `TTS reply: "${replyText}"`);
+
+        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "xi-api-key": getApiKey() },
+          body: JSON.stringify({
+            text: replyText,
+            model_id: $("tts-model").value,
+            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`TTS failed: ${res.status}`);
+        }
+
+        const audioBlob = await res.blob();
+        const url = URL.createObjectURL(audioBlob);
+        log(rtLog, `Audio ready (${(audioBlob.size / 1024).toFixed(1)} KB) — playing...`);
+        setStatus($("roundtrip-voxtral-status"), "status-ok", "Playing response...");
+
+        stopAudio();
+        currentAudio = new Audio(url);
+        currentAudio.addEventListener("ended", () => {
+          log(rtLog, "Voxtral round-trip complete!");
+          setStatus($("roundtrip-voxtral-status"), "status-ok", "Round-trip complete!");
+          currentAudio = null;
+        });
+        currentAudio.play();
+      } catch (err) {
+        log(rtLog, `ERROR: ${err.message}`);
+        setStatus($("roundtrip-voxtral-status"), "status-err", err.message);
+      }
+
+      btn.disabled = false;
+    });
+  </script>
+</body>
+</html>

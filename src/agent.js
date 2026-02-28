@@ -1,63 +1,15 @@
 /* ═══════════════════════════════════════════════════════════════
-   CRIME SCENE — agent.js
-   AI Agent system: SuspectAgent class, LLM API, prompt building,
-   fallback response engine. No DOM dependencies.
-   Depends on: engine.js (for pick, clamp, LOCATIONS, TIME_LABELS,
-   TIME_DESCRIPTIONS and data pools)
+   SuspectAgent — AI-powered (or fallback) suspect interrogation.
+   Each suspect gets an agent that manages conversation, emotion,
+   and response generation.
    ═══════════════════════════════════════════════════════════════ */
 
-// ─── LLM API Configuration ─────────────────────────────────
+import { pick, clamp } from './utils.js';
+import { LOCATIONS, TIME_LABELS, TIME_DESCRIPTIONS } from './data.js';
+import { chatCompletion, isLLMEnabled } from './services.js';
+import { events } from './events.js';
 
-function getApiConfig() {
-  const cfg = window.CRIME_SCENE_CONFIG || {};
-  return {
-    enabled: !!cfg.apiKey,
-    provider: cfg.provider || "mistral",
-    apiKey: cfg.apiKey || "",
-    model: cfg.model || "mistral-small-latest",
-    baseUrl: cfg.baseUrl || ""
-  };
-}
-
-function getBaseUrl(config) {
-  if (config.baseUrl) return config.baseUrl.replace(/\/+$/, "");
-  switch (config.provider) {
-    case "openai":  return "https://api.openai.com/v1";
-    case "mistral": return "https://api.mistral.ai/v1";
-    case "groq":    return "https://api.groq.com/openai/v1";
-    case "ollama":  return "http://localhost:11434/v1";
-    default:        return config.baseUrl || "https://api.openai.com/v1";
-  }
-}
-
-async function callLLM(messages, config) {
-  const baseUrl = getBaseUrl(config);
-  const headers = { "Content-Type": "application/json" };
-  if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
-
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model: config.model,
-      messages,
-      max_tokens: 300,
-      temperature: 0.8
-    })
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`LLM API error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json();
-  return data.choices[0].message.content.trim();
-}
-
-// ─── Suspect Agent ──────────────────────────────────────────
-
-class SuspectAgent {
+export class SuspectAgent {
   constructor(profile, caseData, allSuspects) {
     this.profile = profile;
     this.caseData = caseData;
@@ -182,13 +134,12 @@ ${culpritBlock}
   // ── Main Response Entry Point ──
 
   async respond(userMessage) {
-    const config = getApiConfig();
     this.updatePressure(userMessage);
     this.profile.dialogue_policy.memory.last_questions.push(userMessage);
 
     let response;
-    if (config.apiKey) {
-      response = await this.llmRespond(userMessage, config);
+    if (isLLMEnabled()) {
+      response = await this.llmRespond(userMessage);
     } else {
       response = this.fallbackRespond(userMessage);
     }
@@ -198,12 +149,20 @@ ${culpritBlock}
     this.updateEmotionalState(userMessage);
     this.caseData.questionCount++;
 
+    events.emit('suspect:response', {
+      suspectId: this.profile.id,
+      suspect: this.profile,
+      text: response.text,
+      isLLM: response.isLLM,
+      clueData: response.clueData,
+    });
+
     return response;
   }
 
   // ── LLM Response ──
 
-  async llmRespond(userMessage, config) {
+  async llmRespond(userMessage) {
     const systemPrompt = this.buildSystemPrompt();
     const messages = [
       { role: "system", content: systemPrompt },
@@ -212,7 +171,7 @@ ${culpritBlock}
     ];
 
     try {
-      const text = await callLLM(messages, config);
+      const text = await chatCompletion(messages);
       const clueData = this.analyzeResponse(userMessage, text);
       return { text, tag: clueData?.tag || "info", clueData, isLLM: true };
     } catch (err) {
@@ -470,7 +429,7 @@ ${culpritBlock}
     return pick(prefixes[this.profile.personality.trait] || [""], Math.random);
   }
 
-  // ── LLM Response Analysis (extract structured clue data) ──
+  // ── LLM Response Analysis ──
 
   analyzeResponse(question, responseText) {
     const qType = this.classifyQuestion(question);
