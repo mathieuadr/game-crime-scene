@@ -289,6 +289,13 @@ body::after {
   margin-bottom: 1.1rem;
   text-align: left;
 }
+.field.subfield {
+  margin-top: -.3rem;
+  margin-bottom: .9rem;
+  padding-left: 1rem;
+  border-left: 2px solid var(--border-strong);
+  opacity: .9;
+}
 .field label {
   display: block;
   font-family: var(--font-label);
@@ -367,18 +374,18 @@ body::after {
   border-color: var(--border-strong);
 }
 .mode-btn.active {
-  background: rgba(139, 26, 26, .15);
-  color: var(--blood);
-  border-color: var(--blood);
+  background: rgba(45, 90, 39, .2);
+  color: #6fbf63;
+  border-color: rgba(45, 90, 39, .4);
   transform: scale(.97);
-  box-shadow: inset 0 0 8px rgba(139,26,26,.2);
+  box-shadow: inset 0 0 8px rgba(45, 90, 39, .15);
 }
 .mode-btn.active::after {
   content: '✓';
   position: absolute;
   top: -6px;
   right: -6px;
-  background: var(--blood);
+  background: #6fbf63;
   color: #fff;
   width: 16px;
   height: 16px;

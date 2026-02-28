@@ -228,7 +228,10 @@ function onGameStarted({ caseData, suspects }) {
   );
   addNote(store, "Case opened", `Victim: ${caseData.victim.name}. Location: ${caseData.crime.location}. Weapon: ${caseData.crime.weapon}.`, "info");
 
-  if (isImageEnabled()) generateSceneImages(caseData);
+  if (isImageEnabled()) {
+    generateSceneImages(caseData);
+    suspects.forEach(s => generateSuspectPortrait(s));
+  }
 
   renderServiceIndicators();
 }
@@ -371,10 +374,23 @@ function openSceneLightbox(url, caseData) {
 function onImageReady({ cacheKey, url }) {
   const match = cacheKey?.match(/^portrait_(suspect_\d+)$/);
   if (match) {
-    const photoEl = document.querySelector(`[data-portrait="${match[1]}"] img`);
-    if (photoEl) {
-      photoEl.src = url;
-      photoEl.style.display = 'block';
+    const suspectId = match[1];
+    const container = document.querySelector(`[data-portrait="${suspectId}"]`);
+    if (!container) return;
+
+    const existingImg = container.querySelector('img');
+    if (existingImg) {
+      existingImg.src = url;
+      existingImg.style.display = 'block';
+    } else {
+      // Replace letter avatar with the loaded portrait
+      const suspect = store.suspects.find(s => s.id === suspectId);
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = suspect?.name || suspectId;
+      const letterSpan = container.querySelector('.avatar-letter');
+      if (letterSpan) letterSpan.replaceWith(img);
+      else container.prepend(img);
     }
   }
 }

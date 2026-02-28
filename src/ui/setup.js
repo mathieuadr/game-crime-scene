@@ -64,6 +64,10 @@ function wireStoryModeToggle() {
   const btns = document.querySelectorAll(".mode-btn");
   const hint = $("story-mode-hint");
   const themeField = $("ai-theme-field");
+  const seedField = $("classic-seed-field");
+
+  // Sync to the initially active button (AI by default)
+  store.storyMode = "ai";
 
   btns.forEach(btn => {
     btn.addEventListener("click", () => {
@@ -75,9 +79,11 @@ function wireStoryModeToggle() {
       if (store.storyMode === "ai") {
         hint.textContent = "An LLM generates a unique story, characters, and clues from scratch.";
         show(themeField);
+        hide(seedField);
       } else {
         hint.textContent = "Procedural story from built-in data pools.";
         hide(themeField);
+        show(seedField);
       }
     });
   });

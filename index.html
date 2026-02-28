@@ -65,22 +65,22 @@
       </div>
 
       <div class="field">
-        <label for="seed-input">Case Seed</label>
-        <input type="text" id="seed-input" placeholder="CASE FILE #______">
-      </div>
-
-      <div class="field">
         <label>Story Generation</label>
         <div class="story-mode-toggle">
-          <button type="button" class="mode-btn active" data-mode="classic">Classic</button>
-          <button type="button" class="mode-btn" data-mode="ai">AI Generated</button>
+          <button type="button" class="mode-btn" data-mode="classic">Classic</button>
+          <button type="button" class="mode-btn active" data-mode="ai">AI Generated</button>
         </div>
-        <p class="field-hint" id="story-mode-hint">Procedural story from built-in data pools.</p>
+        <p class="field-hint" id="story-mode-hint">An LLM generates a unique story, characters, and clues from scratch.</p>
       </div>
 
-      <div id="ai-theme-field" class="field" style="display:none">
+      <div id="ai-theme-field" class="field subfield">
         <label for="ai-theme">Story Theme</label>
         <input type="text" id="ai-theme" placeholder="e.g. 1920s jazz club, space station...">
+      </div>
+
+      <div id="classic-seed-field" class="field subfield" style="display:none">
+        <label for="seed-input">Case Seed</label>
+        <input type="text" id="seed-input" placeholder="CASE FILE #______">
       </div>
 
       <!-- Service status indicators -->
