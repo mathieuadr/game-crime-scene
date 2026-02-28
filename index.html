@@ -24,15 +24,35 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Crime Scene — Detective Mystery Game</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Special+Elite&display=swap" rel="stylesheet">
+
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+  <!-- Global overlays -->
+  <div id="scanline-overlay"></div>
+  <div id="edge-flash"></div>
+
   <!-- ═══ SETUP SCREEN ═══ -->
   <div id="setup-screen">
+    <!-- Video background (user places video in assets/videos/bg-loop.mp4) -->
+    <video class="bg-video" autoplay loop muted playsinline>
+      <source src="assets/videos/bg-loop.mp4" type="video/mp4">
+    </video>
+    <div class="bg-video-overlay"></div>
+
+    <div class="setup-title-area">
+      <h1 id="title-text"></h1>
+      <p class="subtitle" id="subtitle-text">A Deductive Mystery Game</p>
+    </div>
+
     <div class="setup-box">
-      <h1>&#128270; Crime Scene</h1>
-      <p class="subtitle">A Deductive Mystery Game</p>
+      <div class="section-label">Case File</div>
 
       <div class="field">
         <label for="suspect-count">Number of Suspects</label>
@@ -45,8 +65,8 @@
       </div>
 
       <div class="field">
-        <label for="seed-input">Case Seed (optional)</label>
-        <input type="text" id="seed-input" placeholder="Leave blank for random">
+        <label for="seed-input">Case Seed</label>
+        <input type="text" id="seed-input" placeholder="CASE FILE #______">
       </div>
 
       <div class="field">
@@ -59,14 +79,14 @@
       </div>
 
       <div id="ai-theme-field" class="field" style="display:none">
-        <label for="ai-theme">Story Theme (optional)</label>
-        <input type="text" id="ai-theme" placeholder="e.g. 1920s jazz club, space station, medieval castle…">
+        <label for="ai-theme">Story Theme</label>
+        <input type="text" id="ai-theme" placeholder="e.g. 1920s jazz club, space station...">
       </div>
 
       <!-- Service status indicators -->
       <div id="service-status" class="service-status"></div>
 
-      <button class="btn btn-primary" id="btn-start">Start Case</button>
+      <button class="btn btn-cta" id="btn-start">&#9655; OPEN FILE</button>
     </div>
   </div>
 
@@ -81,6 +101,10 @@
 
   <!-- ═══ GAME SCREEN ═══ -->
   <div id="game-screen">
+    <video class="bg-video game-bg-video" autoplay loop muted playsinline>
+      <source src="assets/videos/bg-loop.mp4" type="video/mp4">
+    </video>
+    <div class="bg-video-overlay game-overlay"></div>
     <div class="game-layout">
 
       <!-- Header -->
@@ -88,7 +112,8 @@
         <h2 id="header-case-info">Case #------</h2>
         <div class="header-actions">
           <span id="active-services"></span>
-          <button class="btn btn-sm btn-outline" id="btn-voice-toggle" title="Toggle auto-voice (classic TTS)">&#128264; Voice</button>
+          <button class="btn-mute" id="btn-mute" title="Toggle sound effects">&#128264;</button>
+          <button class="btn btn-sm btn-outline" id="btn-voice-toggle" title="Toggle auto-voice">Voice</button>
           <button class="btn btn-sm btn-outline" id="btn-debug-toggle">Debug</button>
           <button class="btn btn-sm btn-outline" id="btn-new-case">New Case</button>
         </div>
@@ -128,19 +153,19 @@
           <div class="panel-title">Interrogation Room</div>
 
           <div class="interrogation-controls" id="interrogation-controls" style="display:none">
-            <button class="btn btn-sm btn-outline" id="btn-ask-alibi" title="Ask about their alibi at murder time">Alibi</button>
-            <button class="btn btn-sm btn-outline" id="btn-ask-victim" title="Ask about the victim">Victim</button>
+            <button class="btn-keycap" id="btn-ask-alibi" title="Ask about their alibi at murder time">Alibi</button>
+            <button class="btn-keycap" id="btn-ask-victim" title="Ask about the victim">Victim</button>
 
             <select id="select-about-suspect" title="Choose a suspect to ask about"></select>
-            <button class="btn btn-sm btn-outline" id="btn-ask-about" title="Ask about another suspect">Ask about</button>
+            <button class="btn-keycap" id="btn-ask-about" title="Ask about another suspect">Ask about</button>
 
             <select id="select-time" title="Choose a time period"></select>
-            <button class="btn btn-sm btn-outline" id="btn-ask-time" title="Ask where they were at this time">Where?</button>
+            <button class="btn-keycap" id="btn-ask-time" title="Ask where they were at this time">Where?</button>
 
-            <button class="btn btn-sm btn-outline" id="btn-ask-shoes" title="Ask their shoe size">Shoes</button>
-            <button class="btn btn-sm btn-outline" id="btn-ask-item" title="Ask about their personal item">Item</button>
-            <button class="btn btn-sm btn-outline btn-confront" id="btn-ask-confront" title="Confront with evidence">Confront</button>
-            <button class="btn btn-sm btn-outline btn-pressure" id="btn-ask-secret" title="Pressure for secrets">Pressure</button>
+            <button class="btn-keycap" id="btn-ask-shoes" title="Ask their shoe size">Shoes</button>
+            <button class="btn-keycap" id="btn-ask-item" title="Ask about their personal item">Item</button>
+            <button class="btn-keycap btn-confront" id="btn-ask-confront" title="Confront with evidence">Confront</button>
+            <button class="btn-keycap btn-pressure" id="btn-ask-secret" title="Pressure for secrets">Pressure</button>
           </div>
 
           <div class="chat-log" id="chat-log"></div>
@@ -152,11 +177,6 @@
             <button class="btn btn-sm btn-primary" id="btn-send">Send</button>
           </div>
 
-          <div class="accuse-bar">
-            <select id="select-accuse"></select>
-            <button class="btn btn-sm btn-danger" id="btn-accuse">Accuse!</button>
-            <button class="btn btn-sm btn-outline" id="btn-reveal" title="Reveal the solution">Reveal</button>
-          </div>
         </div>
 
         <!-- Debug panel -->
@@ -164,7 +184,7 @@
       </div>
 
       <!-- Right: Notes -->
-      <div class="panel">
+      <div class="panel notes-panel" id="notes-panel">
         <div class="panel-title">Inspector's Notes</div>
         <div class="panel-body notes-body" id="notes-log"></div>
       </div>
