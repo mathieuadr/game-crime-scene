@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<!--
+  ElevenLabs Conversational AI — Standalone Test Page
+
+  Run: python3 -m http.server 8000 --bind localhost
+  Open: http://localhost:8000/test-conversation.html
+
+  Tests the WebSocket session independently from the game.
+  Use this to debug connect/disconnect issues.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Conversational AI Test</title>
+  <style>
+    :root { --bg:#1a1a2e; --card:#16213e; --border:#2a3a5e; --accent:#e94560; --text:#eee; --dim:#8899aa; --ok:#4ade80; --err:#ef4444; --warn:#fbbf24; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); padding:2rem; max-width:720px; margin:0 auto; }
+    h1 { font-size:1.3rem; margin-bottom:.3rem; }
+    .sub { color:var(--dim); font-size:.85rem; margin-bottom:2rem; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:1.4rem; margin-bottom:1.2rem; }
+    h2 { font-size:.95rem; color:var(--accent); margin-bottom:.8rem; }
+    label { display:block; font-size:.78rem; color:var(--dim); margin-bottom:.3rem; }
+    input,textarea { width:100%; padding:.45rem .7rem; background:#0f3460; border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:.85rem; outline:none; margin-bottom:.7rem; }
+    input:focus,textarea:focus { border-color:var(--accent); }
+    textarea { resize:vertical; min-height:80px; font-family:monospace; font-size:.78rem; }
+    button { padding:.45rem 1rem; border:none; border-radius:6px; font-size:.85rem; font-weight:600; cursor:pointer; }
+    button:disabled { opacity:.4; cursor:not-allowed; }
+    .btn-primary { background:var(--accent); color:#fff; }
+    .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .btn-danger { background:var(--err); color:#fff; }
+    .row { display:flex; gap:.6rem; margin-bottom:.8rem; }
+    .badge { display:inline-block; padding:.2rem .6rem; border-radius:20px; font-size:.75rem; font-weight:700; }
+    .badge-ok   { background:rgba(74,222,128,.15); color:var(--ok); }
+    .badge-err  { background:rgba(239,68,68,.15);  color:var(--err); }
+    .badge-wait { background:rgba(251,191,36,.15); color:var(--warn); }
+    .badge-off  { background:rgba(255,255,255,.06); color:var(--dim); }
+    #status-bar { display:flex; align-items:center; gap:.8rem; margin-bottom:1rem; }
+    #mode-display { font-size:.8rem; color:var(--dim); }
+    .log { background:#0a0a1a; border:1px solid #333; border-radius:6px; padding:.6rem; font-family:monospace; font-size:.75rem; max-height:280px; overflow-y:auto; white-space:pre-wrap; }
+    .log-entry { margin-bottom:.3rem; line-height:1.4; }
+    .log-ts   { color:#555; }
+    .log-info { color:#88bbff; }
+    .log-ok   { color:var(--ok); }
+    .log-err  { color:var(--err); }
+    .log-warn { color:var(--warn); }
+    .log-user { color:#fff; }
+    .log-ai   { color:#c8b4ff; }
+    .hint { font-size:.78rem; color:var(--warn); background:rgba(251,191,36,.08); border:1px solid rgba(251,191,36,.2); border-radius:6px; padding:.6rem .8rem; margin-bottom:.8rem; line-height:1.5; }
+  </style>
+</head>
+<body>
+
+<h1>ElevenLabs Conversational AI — Test</h1>
+<p class="sub">Minimal standalone test. Open browser console for full details.</p>
+
+<!-- Config -->
+<div class="card">
+  <h2>1. Configuration</h2>
+  <label>ElevenLabs API Key</label>
+  <input type="password" id="api-key" placeholder="sk_...">
+  <label>Agent ID</label>
+  <input type="text" id="agent-id" placeholder="agent_01jx...">
+  <label>System Prompt Override (optional — leave blank to use agent's default)</label>
+  <textarea id="system-prompt" placeholder="Leave blank to test without override first."></textarea>
+  <label>First Message Override (optional)</label>
+  <input type="text" id="first-message" placeholder="e.g. Inspector, I'm ready.">
+</div>
+
+<!-- Controls -->
+<div class="card">
+  <h2>2. Session</h2>
+
+  <div class="hint" id="hint-llm" style="display:none">
+    ⚠ The session is connecting but disconnecting immediately. Most likely cause: your agent is set to
+    <strong>Custom LLM</strong> in the ElevenLabs dashboard, but the backend URL isn't reachable.
+    Fix: either switch the agent's LLM to <strong>Claude</strong> or <strong>GPT-4</strong> in the dashboard,
+    or expose your backend with ngrok and update the Custom LLM URL.
+  </div>
+
+  <div id="status-bar">
+    <span id="status-badge" class="badge badge-off">Disconnected</span>
+    <span id="mode-display">—</span>
+  </div>
+
+  <div class="row">
+    <button class="btn-primary" id="btn-connect">Connect</button>
+    <button class="btn-danger"  id="btn-disconnect" disabled>Disconnect</button>
+    <button class="btn-outline" id="btn-clear-log">Clear log</button>
+  </div>
+</div>
+
+<!-- Live log -->
+<div class="card">
+  <h2>3. Event Log</h2>
+  <div class="log" id="log"></div>
+</div>
+
+<!-- Transcript -->
+<div class="card">
+  <h2>4. Messages</h2>
+  <div class="log" id="messages"></div>
+</div>
+
+<script type="module">
+
+// ── Pre-fill from config.js if loaded ──────────────────────
+const cfg = window.CRIME_SCENE_CONFIG || {};
+if (cfg.elevenLabsApiKey) document.getElementById("api-key").value  = cfg.elevenLabsApiKey;
+if (cfg.elevenLabsAgentId) document.getElementById("agent-id").value = cfg.elevenLabsAgentId;
+
+// ── Helpers ────────────────────────────────────────────────
+const logEl    = document.getElementById("log");
+const msgsEl   = document.getElementById("messages");
+let connectTime = null;
+
+function ts() {
+  return new Date().toLocaleTimeString("en-GB", { hour12: false });
+}
+
+function log(text, type = "info") {
+  const el = document.createElement("div");
+  el.className = "log-entry";
+  el.innerHTML = `<span class="log-ts">[${ts()}]</span> <span class="log-${type}">${text}</span>`;
+  logEl.appendChild(el);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function addMessage(source, text) {
+  const el = document.createElement("div");
+  el.className = "log-entry";
+  const label = source === "ai" ? "🤖 Agent" : "🧑 You";
+  el.innerHTML = `<span class="log-ts">[${ts()}]</span> <span class="log-${source}">${label}: ${text}</span>`;
+  msgsEl.appendChild(el);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+
+function setStatus(state) {
+  const badge = document.getElementById("status-badge");
+  const map = {
+    disconnected: ["Disconnected", "badge-off"],
+    connecting:   ["Connecting…",  "badge-wait"],
+    connected:    ["Connected",    "badge-ok"],
+    error:        ["Error",        "badge-err"],
+  };
+  const [text, cls] = map[state] || map.disconnected;
+  badge.textContent = text;
+  badge.className   = `badge ${cls}`;
+}
+
+function setMode(mode) {
+  const el = document.getElementById("mode-display");
+  if (!mode) { el.textContent = "—"; return; }
+  el.textContent = mode === "speaking" ? "🔊 Suspect speaking" : "🎤 Listening";
+}
+
+// ── SDK ────────────────────────────────────────────────────
+let _Conversation = null;
+let _session      = null;
+
+async function loadSDK() {
+  if (_Conversation) return _Conversation;
+  log("Loading @11labs/client SDK from esm.sh…", "info");
+  try {
+    const mod = await import("https://esm.sh/@11labs/client");
+    _Conversation = mod.Conversation;
+    log("SDK loaded ✓", "ok");
+    return _Conversation;
+  } catch (err) {
+    log(`SDK load failed: ${err.message}`, "err");
+    throw err;
+  }
+}
+
+// ── Connect ────────────────────────────────────────────────
+document.getElementById("btn-connect").addEventListener("click", async () => {
+  const agentId      = document.getElementById("agent-id").value.trim();
+  const systemPrompt = document.getElementById("system-prompt").value.trim();
+  const firstMessage = document.getElementById("first-message").value.trim();
+
+  if (!agentId) { log("Agent ID is required.", "err"); return; }
+
+  document.getElementById("btn-connect").disabled    = true;
+  document.getElementById("btn-disconnect").disabled = false;
+  document.getElementById("hint-llm").style.display  = "none";
+
+  setStatus("connecting");
+  log(`Connecting to agent: ${agentId}`, "info");
+  if (systemPrompt) log("Using system prompt override.", "info");
+  else              log("No system prompt override — using agent default.", "warn");
+
+  try {
+    const Conversation = await loadSDK();
+
+    const overrides = {};
+    if (systemPrompt || firstMessage) {
+      overrides.agent = {};
+      if (systemPrompt)  overrides.agent.prompt       = { prompt: systemPrompt };
+      if (firstMessage)  overrides.agent.firstMessage = firstMessage;
+    }
+
+    connectTime = Date.now();
+
+    _session = await Conversation.startSession({
+      agentId,
+      overrides: Object.keys(overrides).length ? overrides : undefined,
+
+      onConnect: ({ conversationId }) => {
+        log(`✓ Connected — conversation ID: ${conversationId}`, "ok");
+        setStatus("connected");
+        connectTime = Date.now();
+      },
+
+      onDisconnect: () => {
+        const duration = connectTime ? ((Date.now() - connectTime) / 1000).toFixed(1) : "?";
+        log(`Disconnected after ${duration}s`, duration < 3 ? "warn" : "info");
+        if (duration < 3) {
+          log("Session ended in under 3s — likely cause: Custom LLM URL unreachable, or agent misconfigured.", "err");
+          document.getElementById("hint-llm").style.display = "";
+        }
+        setStatus("disconnected");
+        setMode(null);
+        _session = null;
+        document.getElementById("btn-connect").disabled    = false;
+        document.getElementById("btn-disconnect").disabled = true;
+      },
+
+      onMessage: ({ message, source }) => {
+        log(`Message [${source}]: ${message.slice(0, 80)}${message.length > 80 ? "…" : ""}`, source === "ai" ? "ai" : "user");
+        addMessage(source, message);
+      },
+
+      onError: (message, context) => {
+        log(`Error: ${message}`, "err");
+        if (context) log(`Context: ${JSON.stringify(context)}`, "err");
+        console.error("[ElevenLabs] Error:", message, context);
+        setStatus("error");
+      },
+
+      onStatusChange: ({ status }) => {
+        log(`Status → ${status}`, "info");
+      },
+
+      onModeChange: ({ mode }) => {
+        log(`Mode → ${mode}`, "info");
+        setMode(mode);
+      },
+    });
+
+  } catch (err) {
+    log(`startSession threw: ${err.message}`, "err");
+    console.error(err);
+    setStatus("error");
+    document.getElementById("btn-connect").disabled    = false;
+    document.getElementById("btn-disconnect").disabled = true;
+  }
+});
+
+// ── Disconnect ─────────────────────────────────────────────
+document.getElementById("btn-disconnect").addEventListener("click", async () => {
+  if (_session) {
+    log("Ending session…", "info");
+    try { await _session.endSession(); } catch (e) { log(`endSession error: ${e.message}`, "err"); }
+  }
+  document.getElementById("btn-disconnect").disabled = true;
+  document.getElementById("btn-connect").disabled    = false;
+});
+
+// ── Clear ──────────────────────────────────────────────────
+document.getElementById("btn-clear-log").addEventListener("click", () => {
+  logEl.innerHTML  = "";
+  msgsEl.innerHTML = "";
+});
+
+log("Ready. Fill in Agent ID and click Connect.", "info");
+
+</script>
+
+<!-- Load config.js to pre-fill keys -->
+<script src="config.js"></script>
+
+</body>
+</html>

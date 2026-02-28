@@ -5,10 +5,12 @@
 
 import { createRng, pick, shuffle, randInt, randFloat } from './utils.js';
 import {
-  FIRST_NAMES, LAST_NAMES, ROLES, PERSONALITY_TRAITS, SPEAKING_STYLES,
+  FIRST_NAMES_MALE, FIRST_NAMES_FEMALE, LAST_NAMES, ROLES,
+  PERSONALITY_TRAITS, SPEAKING_STYLES,
   RELATIONSHIP_TYPES, LOCATIONS, ACTIVITIES, VICTIM_POOL, WEAPONS,
   SECRET_POOL, MOTIVE_REASONS, FABRIC_COLORS, PERSONAL_ITEMS,
-  TIME_LABELS, TIME_DESCRIPTIONS, VOICE_TONES
+  TIME_LABELS, TIME_DESCRIPTIONS, VOICE_TONES,
+  HAIR_STYLES, BUILDS, FACIAL_FEATURES, DISTINGUISHING_MARKS
 } from './data.js';
 import { chatCompletion, getConfig } from './services.js';
 
@@ -20,9 +22,11 @@ function generateSuspects(count, rng) {
   const roles = shuffle(ROLES, rng);
 
   for (let i = 0; i < count; i++) {
+    const gender = rng() < 0.5 ? "male" : "female";
+    const namePool = gender === "male" ? FIRST_NAMES_MALE : FIRST_NAMES_FEMALE;
     let first, last, fullName;
     do {
-      first = pick(FIRST_NAMES, rng);
+      first = pick(namePool, rng);
       last = pick(LAST_NAMES, rng);
       fullName = `${first} ${last}`;
     } while (usedNames.has(fullName));
@@ -37,6 +41,7 @@ function generateSuspects(count, rng) {
       index: i,
       name: fullName,
       firstName: first,
+      gender,
       age: randInt(25, 65, rng),
       role: roles[i % roles.length],
       voiceTone: VOICE_TONES[trait] || "neutral and steady",
@@ -105,6 +110,13 @@ function generateSuspects(count, rng) {
         shoeSize: randInt(7, 12, rng),
         fabricColor: pick(FABRIC_COLORS, rng),
         personalItem: pick(PERSONAL_ITEMS, rng)
+      },
+
+      appearance: {
+        hair: pick(HAIR_STYLES, rng),
+        build: pick(BUILDS, rng),
+        face: pick(FACIAL_FEATURES, rng),
+        distinguishing: pick(DISTINGUISHING_MARKS, rng),
       },
 
       dialogue_policy: {
@@ -445,22 +457,32 @@ Return ONLY a valid JSON object (no markdown, no code fences, no commentary) wit
   "crime": {
     "time": "9:15 PM",
     "location": "a specific place within the setting",
-    "weapon": "the murder weapon (with brief descriptor)"
+    "weapon": "the murder weapon with rich detail (e.g. 'an ornate silver letter opener with an ivory handle' instead of just 'a letter opener')",
+    "weapon_description": "A vivid 2-3 sentence description of the weapon as evidence: its appearance, condition, where exactly it was found, and any notable details (blood, fingerprints, engravings, etc.)",
+    "scene_description": "A vivid 3-5 sentence description of the crime scene: the room layout, lighting, state of furniture, signs of struggle, notable objects around the body, atmosphere. Include specific visual details that a detective would notice."
   },
   "suspects": [
     {
       "firstName": "First",
       "lastName": "Last",
+      "gender": "male or female",
       "age": 40,
       "role": "their relationship to the victim (2-3 words)",
       "personality_trait": "one of: calm, nervous, arrogant, shy, aggressive, friendly",
-      "voiceTone": "a short description of how their voice sounds (e.g. 'deep and gravelly', 'soft and breathy', 'sharp and nasal')",
+      "voiceTone": "a short description of how their voice sounds — MUST match gender (e.g. male: 'deep and gravelly', female: 'soft and breathy')",
       "is_culprit": false,
       "motive_level": "low or medium or high",
       "motive_reason": "Why they might want the victim dead (1 sentence). Empty string if low motive.",
       "secret": {
         "type": "one of: financial, personal, blackmail, criminal, identity, escape, grudge, witness, fraud",
         "text": "a dark secret about this person (starts lowercase, no period)"
+      },
+      "appearance": {
+        "hair": "detailed hair description (color, style, length — e.g. 'short slicked-back silver hair')",
+        "build": "body type (e.g. 'tall and lean', 'stocky and broad-shouldered')",
+        "face": "key facial features (e.g. 'sharp jawline, deep-set brown eyes, thin lips')",
+        "distinguishing": "one notable mark or habit (e.g. 'a thin scar across the left cheek', 'always fidgets with a gold ring')",
+        "clothing": "what they were wearing that evening (e.g. 'a tailored navy suit with a burgundy pocket square')"
       },
       "schedule": {
         "T1_actual": "location at 8:00 PM",
@@ -521,7 +543,40 @@ CRITICAL RULES:
 11. Include exactly ${suspectCount} suspects.
 12. All locations must be specific places within the setting (e.g. "the library", "the wine cellar").
 13. The shoe size of the culprit must appear in at least one evidence description.
-14. The culprit's personal item must appear in at least one evidence description.`;
+14. The culprit's personal item must appear in at least one evidence description.
+15. Each suspect MUST have a detailed "appearance" object with hair, build, face, distinguishing mark, and clothing.
+16. The crime weapon_description and scene_description must be vivid and atmospheric — they will be used to generate images.
+17. The scene_description MUST mention visible clues from the evidence list that a detective could spot.
+18. Each suspect MUST have a "gender" field ("male" or "female"). Ensure a mix of genders. The voiceTone MUST be consistent with the suspect's gender.`;
+}
+
+function repairJSON(text) {
+  // remove trailing commas before ] or }
+  text = text.replace(/,\s*([}\]])/g, '$1');
+  // remove JS-style // comments
+  text = text.replace(/\/\/[^\n]*/g, '');
+  // replace smart quotes with straight quotes
+  text = text.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
+  return text;
+}
+
+function extractJSON(raw) {
+  // 1. strip markdown fences
+  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/s);
+  const candidate = fenceMatch ? fenceMatch[1].trim() : raw.trim();
+
+  // 2. find the outermost { … } in case there is surrounding prose
+  const start = candidate.indexOf('{');
+  const end   = candidate.lastIndexOf('}');
+  const text  = (start !== -1 && end > start) ? candidate.slice(start, end + 1) : candidate;
+
+  // 3. try direct parse
+  try { return JSON.parse(text); } catch (_) {}
+
+  // 4. try with repairs (trailing commas, smart quotes, comments)
+  try { return JSON.parse(repairJSON(text)); } catch (_) {}
+
+  throw new Error("No valid JSON found in response");
 }
 
 export async function generateCaseAI(suspectCount, theme, onStatus) {
@@ -538,23 +593,25 @@ export async function generateCaseAI(suspectCount, theme, onStatus) {
 
   if (onStatus) onStatus("The AI is writing your mystery...");
 
-  let raw = await chatCompletion(messages, { maxTokens: 4096, temperature: 0.9 });
-
-  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) raw = fenceMatch[1].trim();
+  let raw = await chatCompletion(messages, { maxTokens: 16000, temperature: 0.9, jsonMode: true });
 
   if (onStatus) onStatus("Parsing the generated mystery...");
 
   let story;
   try {
-    story = JSON.parse(raw);
+    story = extractJSON(raw);
   } catch (e) {
-    console.error("Failed to parse AI story JSON:", raw);
-    throw new Error("The AI returned invalid JSON. Try again.");
+    console.error("=== RAW MODEL RESPONSE ===\n", raw, "\n=========================");
+    throw new Error(`JSON parse failed: ${e.message}`);
   }
 
   if (onStatus) onStatus("Building the case file...");
-  return buildCaseFromAIStory(story, suspectCount);
+  try {
+    return buildCaseFromAIStory(story, suspectCount);
+  } catch (e) {
+    console.error("=== buildCaseFromAIStory error ===\n", e, "\nStory object:\n", JSON.stringify(story, null, 2));
+    throw new Error(`Story build failed: ${e.message}`);
+  }
 }
 
 function buildCaseFromAIStory(story, expectedCount) {
@@ -566,7 +623,9 @@ function buildCaseFromAIStory(story, expectedCount) {
     crime: {
       time: story.crime.time || "9:15 PM",
       location: story.crime.location,
-      weapon: story.crime.weapon
+      weapon: story.crime.weapon,
+      weaponDescription: story.crime.weapon_description || "",
+      sceneDescription: story.crime.scene_description || "",
     },
     culpritId: null,
     evidence: [],
@@ -587,6 +646,7 @@ function buildCaseFromAIStory(story, expectedCount) {
       index: i,
       name: `${s.firstName} ${s.lastName}`,
       firstName: s.firstName,
+      gender: s.gender || (rng() < 0.5 ? "male" : "female"),
       age: s.age || randInt(25, 65, rng),
       role: s.role,
       voiceTone: s.voiceTone || VOICE_TONES[trait] || "neutral and steady",
@@ -671,6 +731,14 @@ function buildCaseFromAIStory(story, expectedCount) {
         shoeSize: s.physical?.shoeSize || randInt(7, 12, rng),
         fabricColor: s.physical?.fabricColor || pick(FABRIC_COLORS, rng),
         personalItem: s.physical?.personalItem || pick(PERSONAL_ITEMS, rng)
+      },
+
+      appearance: {
+        hair: s.appearance?.hair || pick(HAIR_STYLES, rng),
+        build: s.appearance?.build || pick(BUILDS, rng),
+        face: s.appearance?.face || pick(FACIAL_FEATURES, rng),
+        distinguishing: s.appearance?.distinguishing || pick(DISTINGUISHING_MARKS, rng),
+        clothing: s.appearance?.clothing || "",
       },
 
       dialogue_policy: {

@@ -10,6 +10,16 @@ export const FIRST_NAMES = [
   "Roman","Chloe","Leo","Vera","Camille","Alex","Simon","Margot"
 ];
 
+export const FIRST_NAMES_MALE = [
+  "James","Victor","Marcus","Daniel","Arthur","Hugo","Felix","Oscar",
+  "Roman","Leo","Simon","Alex","Edmund","Harold","Thomas","Richard"
+];
+
+export const FIRST_NAMES_FEMALE = [
+  "Elena","Clara","Sofia","Nora","Lena","Isabel","Diana","Maya",
+  "Chloe","Vera","Camille","Margot","Catherine","Josephine","Margaret","Eloise"
+];
+
 export const LAST_NAMES = [
   "Blackwood","Sinclair","Moreau","Ashford","Crane","Delacroix","Fontaine",
   "Graves","Hartwell","Kensington","Langley","Mercer","Northcott","Prescott",
@@ -97,6 +107,34 @@ export const TIME_LABELS = { T1: "8:00 PM", T2: "9:15 PM", T3: "10:30 PM" };
 export const TIME_DESCRIPTIONS = { T1: "Before the murder", T2: "Murder window", T3: "After the murder" };
 
 export const AVATAR_COLORS = ["#e94560","#0f3460","#4ade80","#fbbf24","#a78bfa","#f97316"];
+
+export const HAIR_STYLES = [
+  "short slicked-back silver hair","long wavy auburn hair","cropped dark hair with grey temples",
+  "curly black hair","straight blonde bob","thick brown hair swept to one side",
+  "balding with a neat comb-over","wild unkempt grey hair","tight braids pinned up",
+  "shoulder-length red hair","buzz cut","elegant updo with streaks of grey"
+];
+
+export const BUILDS = [
+  "tall and lean","stocky and broad-shouldered","petite and wiry",
+  "heavyset","average build","athletic and muscular","gaunt and angular","plump and short"
+];
+
+export const FACIAL_FEATURES = [
+  "sharp jawline and hollow cheeks","round face with warm eyes","prominent nose and thick eyebrows",
+  "high cheekbones and thin lips","soft features with laugh lines","scarred left cheek",
+  "deep-set dark eyes","bright blue eyes behind wire-rimmed glasses",
+  "piercing green eyes","weathered sun-tanned face","freckles across the nose",
+  "a thin mustache","neatly trimmed beard","clean-shaven with a dimpled chin"
+];
+
+export const DISTINGUISHING_MARKS = [
+  "a small scar above the right eyebrow","a beauty mark on the left cheek",
+  "calloused hands from manual work","perfectly manicured nails",
+  "a faded tattoo on the wrist","always wears a gold chain",
+  "walks with a slight limp","a nervous habit of adjusting their cuffs",
+  "ink-stained fingers","a prominent signet ring on the right hand"
+];
 
 export const VOICE_TONES = {
   calm:       "deep and measured, authoritative",

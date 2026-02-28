@@ -8,7 +8,8 @@ import { store } from '../store.js';
 import { hashString } from '../utils.js';
 import { TIME_LABELS, TIME_DESCRIPTIONS, AVATAR_COLORS } from '../data.js';
 import { checkConsistency, evaluateAccusation } from '../engine.js';
-import { getConfig, isLLMEnabled, isImageEnabled, isVoiceEnabled, generateImage, playSuspectVoice, stopVoice, clearVoiceAssignments, isSTTSupported, isSTTActive, startSTT, stopSTT } from '../services.js';
+import { getConfig, isLLMEnabled, isImageEnabled, isVoiceEnabled, isConversationEnabled, generateImage, playSuspectVoice, stopVoice, clearVoiceAssignments, isSTTSupported, isSTTActive, startSTT, stopSTT, getVoiceIdForSuspect } from '../services.js';
+import { startSuspectSession, endCurrentSession, sendTextInput, isActive as isConversationActive } from '../conversation.js';
 import { $, show, hide, setText, escapeHtml, addChatBubble, addTypingIndicator, removeTypingIndicator, addNote } from './helpers.js';
 import { showSetupScreen } from './setup.js';
 
@@ -22,6 +23,8 @@ export function initGameScreen() {
   events.on('game:started', onGameStarted);
   events.on('suspect:selected', onSuspectSelected);
   events.on('image:ready', onImageReady);
+
+  wireConversationEvents();
 }
 
 function wireGameButtons() {
@@ -78,12 +81,53 @@ function wireGameButtons() {
     });
   }
 
+  const talkBtn = $("btn-talk");
+  if (talkBtn) {
+    if (!isConversationEnabled()) {
+      talkBtn.style.display = "none";
+    } else {
+      talkBtn.addEventListener("click", async () => {
+        if (!store.selectedSuspect) {
+          addChatBubble("system", "Select a suspect first.");
+          return;
+        }
+
+        if (isConversationActive()) {
+          talkBtn.disabled = true;
+          await endCurrentSession();
+          // button state reset happens via conversation:disconnected event
+          talkBtn.disabled = false;
+        } else {
+          setTalkButtonState("connecting");
+          talkBtn.disabled = true;
+          const suspect = store.selectedSuspect;
+          const agent   = store.selectedAgent;
+          const { conversation } = getConfig();
+          try {
+            const systemPrompt = agent.buildSystemPrompt();
+            const voiceId      = isVoiceEnabled() ? await getVoiceIdForSuspect(suspect) : null;
+            await startSuspectSession(suspect, systemPrompt, voiceId, conversation.agentId);
+            // button state set to "active" via conversation:connected event
+          } catch (err) {
+            addChatBubble("system", `Voice session failed: ${err.message}`);
+            setTalkButtonState("idle");
+          } finally {
+            talkBtn.disabled = false;
+          }
+        }
+      });
+    }
+  }
+
   const micBtn = $("btn-mic");
   if (micBtn) {
     if (!isSTTSupported()) {
       micBtn.style.display = "none";
     } else {
-      micBtn.addEventListener("click", toggleMic);
+      micBtn.addEventListener("click", () => {
+        if (isConversationActive()) return; // mic managed by ElevenLabs in conversation mode
+        toggleMic();
+      });
     }
   }
 
@@ -167,14 +211,43 @@ function renderServiceIndicators() {
   const container = $("active-services");
   if (!container) return;
   const badges = [];
-  if (isLLMEnabled()) badges.push('<span class="service-indicator si-llm" title="LLM active">AI</span>');
-  if (isImageEnabled()) badges.push('<span class="service-indicator si-image" title="Image generation active">IMG</span>');
-  if (isVoiceEnabled()) badges.push('<span class="service-indicator si-voice" title="Voice active (auto-matched per suspect)">VOX</span>');
-  if (isSTTSupported()) badges.push('<span class="service-indicator si-stt" title="Speech-to-Text available">MIC</span>');
+  if (isLLMEnabled())           badges.push('<span class="service-indicator si-llm"   title="LLM active">AI</span>');
+  if (isImageEnabled())         badges.push('<span class="service-indicator si-image" title="Image generation active">IMG</span>');
+  if (isVoiceEnabled())         badges.push('<span class="service-indicator si-voice" title="Voice active (auto-matched per suspect)">VOX</span>');
+  if (isConversationEnabled())  badges.push('<span class="service-indicator si-conv"  title="Live Voice conversation available">LIVE</span>');
+  if (isSTTSupported())         badges.push('<span class="service-indicator si-stt"   title="Speech-to-Text available">MIC</span>');
   container.innerHTML = badges.join("");
 }
 
 // ─── Image Generation ───────────────────────────────────────
+
+function buildScenePrompt(caseData) {
+  const clueDetails = (caseData.evidence || [])
+    .filter(e => !e.isRedHerring && e.type === "physical")
+    .slice(0, 3)
+    .map(e => e.description)
+    .join(". ");
+
+  const aiScene = caseData.crime.sceneDescription || "";
+
+  return [
+    `A dark, atmospheric crime scene photograph of ${caseData.crime.location}.`,
+    `In the center of the scene there is a dead body lying on the floor, completely covered by a white sheet/blanket — only the human shape is visible under the drape.`,
+    aiScene ? `Scene details: ${aiScene}` : `Moody nighttime lighting, furniture slightly disturbed, signs of a struggle.`,
+    clueDetails ? `Visible clues scattered in the scene: ${clueDetails}.` : "",
+    `The murder weapon (${caseData.crime.weapon}) should be visible nearby.`,
+    `Style: cinematic detective noir, high detail, dramatic shadows, volumetric lighting, wide-angle view of the full room. No text, no UI elements.`
+  ].filter(Boolean).join(" ");
+}
+
+function buildWeaponPrompt(caseData) {
+  const aiDesc = caseData.crime.weaponDescription || "";
+  return [
+    `Close-up evidence photograph of ${caseData.crime.weapon} used in a murder.`,
+    aiDesc ? `Details: ${aiDesc}` : `The weapon shows signs of use, placed on a dark surface with an evidence marker nearby.`,
+    `Style: forensic photography, dramatic side-lighting, dark moody background, extremely detailed macro shot, photorealistic. No text, no labels.`
+  ].filter(Boolean).join(" ");
+}
 
 async function generateSceneImages(caseData) {
   const sceneEl = $("crime-scene-image");
@@ -182,12 +255,12 @@ async function generateSceneImages(caseData) {
 
   if (sceneEl) {
     sceneEl.innerHTML = '<div class="image-loading">Generating crime scene...</div>';
-    const url = await generateImage(
-      `A dark, atmospheric crime scene in ${caseData.crime.location}, nighttime, moody lighting, detective noir style, cinematic, detailed interior`,
-      { cacheKey: `scene_${caseData.seed}`, size: "landscape_4_3" }
-    );
+    const prompt = buildScenePrompt(caseData);
+    const url = await generateImage(prompt, { cacheKey: `scene_${caseData.seed}`, size: "landscape_4_3" });
     if (url) {
-      sceneEl.innerHTML = `<img src="${url}" alt="Crime scene" class="generated-image">`;
+      store.assets.crimeScene = url;
+      sceneEl.innerHTML = `<img src="${url}" alt="Crime scene" class="generated-image scene-thumbnail" title="Click to inspect the crime scene">`;
+      sceneEl.querySelector("img").addEventListener("click", () => openSceneLightbox(url, caseData));
     } else {
       sceneEl.innerHTML = '';
     }
@@ -195,11 +268,10 @@ async function generateSceneImages(caseData) {
 
   if (weaponEl) {
     weaponEl.innerHTML = '<div class="image-loading">Generating weapon...</div>';
-    const url = await generateImage(
-      `${caseData.crime.weapon} as evidence in a murder investigation, dramatic lighting, dark background, photorealistic, close-up detail`,
-      { cacheKey: `weapon_${caseData.seed}`, size: "square" }
-    );
+    const prompt = buildWeaponPrompt(caseData);
+    const url = await generateImage(prompt, { cacheKey: `weapon_${caseData.seed}`, size: "square" });
     if (url) {
+      store.assets.weapon = url;
       weaponEl.innerHTML = `<img src="${url}" alt="Weapon" class="generated-image">`;
     } else {
       weaponEl.innerHTML = '';
@@ -207,16 +279,65 @@ async function generateSceneImages(caseData) {
   }
 }
 
+function buildPortraitPrompt(suspect) {
+  const a = suspect.appearance || {};
+  const genderLabel = suspect.gender === "female" ? "woman" : "man";
+  const parts = [
+    `Portrait of a ${suspect.age}-year-old ${genderLabel}.`,
+    a.hair ? `Hair: ${a.hair}.` : "",
+    a.build ? `Build: ${a.build}.` : "",
+    a.face ? `Face: ${a.face}.` : "",
+    a.distinguishing ? `Notable detail: ${a.distinguishing}.` : "",
+    a.clothing ? `Wearing ${a.clothing}.` : `Wearing ${suspect.physical.fabricColor} clothing.`,
+    `Expression: ${suspect.personality.trait}.`,
+    `Style: noir detective portrait, dramatic chiaroscuro side-lighting, painterly, head and shoulders, dark moody background. No text.`
+  ];
+  return parts.filter(Boolean).join(" ");
+}
+
 async function generateSuspectPortrait(suspect) {
   if (store.assets.suspectPortraits[suspect.id]) return store.assets.suspectPortraits[suspect.id];
 
-  const url = await generateImage(
-    `Portrait of ${suspect.name}, a ${suspect.age}-year-old ${suspect.role}, ${suspect.personality.trait} expression, noir detective style, dramatic side lighting, painterly, head and shoulders`,
-    { cacheKey: `portrait_${suspect.id}`, size: "portrait_4_3" }
-  );
+  const prompt = buildPortraitPrompt(suspect);
+  const url = await generateImage(prompt, { cacheKey: `portrait_${suspect.id}`, size: "portrait_4_3" });
 
   if (url) store.assets.suspectPortraits[suspect.id] = url;
   return url;
+}
+
+function openSceneLightbox(url, caseData) {
+  const existing = document.querySelector(".scene-lightbox");
+  if (existing) existing.remove();
+
+  const clueHints = (caseData.evidence || [])
+    .filter(e => !e.isRedHerring)
+    .slice(0, 4)
+    .map(e => `<li>${escapeHtml(e.description)}</li>`)
+    .join("");
+
+  const overlay = document.createElement("div");
+  overlay.className = "scene-lightbox";
+  overlay.innerHTML = `
+    <div class="scene-lightbox-inner">
+      <button class="scene-lightbox-close" title="Close">&times;</button>
+      <div class="scene-lightbox-img-wrap">
+        <img src="${url}" alt="Crime scene — full view">
+      </div>
+      <div class="scene-lightbox-info">
+        <h3>Crime Scene — ${escapeHtml(caseData.crime.location)}</h3>
+        <p class="scene-lightbox-desc">${escapeHtml(caseData.crime.sceneDescription || `The body was found in ${caseData.crime.location}. The weapon, ${caseData.crime.weapon}, was nearby.`)}</p>
+        ${clueHints ? `<div class="scene-lightbox-clues"><strong>Evidence at the scene:</strong><ul>${clueHints}</ul></div>` : ""}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.classList.contains("scene-lightbox-close")) overlay.remove();
+  });
+  document.addEventListener("keydown", function onKey(e) {
+    if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onKey); }
+  });
 }
 
 function onImageReady({ cacheKey, url }) {
@@ -236,6 +357,12 @@ function clearAssetPanels() {
 
 // ─── Suspect List ───────────────────────────────────────────
 
+function buildAppearanceTooltip(s) {
+  const a = s.appearance || {};
+  const parts = [a.build, a.hair, a.face, a.distinguishing].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "";
+}
+
 function renderSuspectList() {
   const list = $("suspect-list");
   list.innerHTML = "";
@@ -243,11 +370,12 @@ function renderSuspectList() {
     const agent = store.agents[s.id];
     const qCount = agent ? agent.conversationHistory.filter(m => m.role === "user").length : 0;
     const portrait = store.assets.suspectPortraits[s.id];
+    const tooltip = buildAppearanceTooltip(s);
 
     const li = document.createElement("li");
     li.className = "suspect-item" + (store.selectedSuspectId === s.id ? " active" : "");
     li.innerHTML = `
-      <div class="suspect-avatar" data-portrait="${s.id}" style="background:${AVATAR_COLORS[i % AVATAR_COLORS.length]};${portrait ? `background-image:url(${portrait});background-size:cover;` : ''}">
+      <div class="suspect-avatar" data-portrait="${s.id}" title="${escapeHtml(tooltip)}" style="background:${AVATAR_COLORS[i % AVATAR_COLORS.length]};${portrait ? `background-image:url(${portrait});background-size:cover;` : ''}">
         ${portrait ? '' : s.firstName[0]}
       </div>
       <div class="suspect-info">
@@ -260,15 +388,37 @@ function renderSuspectList() {
   });
 }
 
-function onSuspectSelected({ suspectId, suspect }) {
+function buildSuspectIntro(suspect) {
+  const a = suspect.appearance || {};
+  const descParts = [
+    `${suspect.age}yo ${suspect.role}`,
+    `(${suspect.personality.trait})`,
+  ];
+  const physParts = [a.build, a.hair, a.face, a.distinguishing].filter(Boolean);
+  if (physParts.length) descParts.push("— " + physParts.join(", "));
+  if (a.clothing) descParts.push(`Wearing ${a.clothing}.`);
+  return `Now interrogating ${suspect.name} — ${descParts.join(" ")}`;
+}
+
+async function onSuspectSelected({ suspectId, suspect }) {
   renderSuspectList();
   updateSuspectState();
-  addChatBubble("system", `Now interrogating ${suspect.name} — ${suspect.age}yo ${suspect.role} (${suspect.personality.trait}).`);
+  addChatBubble("system", buildSuspectIntro(suspect));
   show("interrogation-controls", "flex");
   $("chat-input").focus();
 
   if (isImageEnabled() && !store.assets.suspectPortraits[suspectId]) {
     generateSuspectPortrait(suspect);
+  }
+
+  // End any session from the previous suspect, reset Talk button for new suspect
+  if (isConversationActive()) {
+    await endCurrentSession();
+  }
+  if (isConversationEnabled()) {
+    const talkBtn = $("btn-talk");
+    if (talkBtn) talkBtn.style.display = "";  // make visible
+    setTalkButtonState("idle");
   }
 }
 
@@ -341,6 +491,18 @@ async function handleSendMessage() {
   addChatBubble("question", msg);
 
   const agent = store.selectedAgent;
+
+  // ── Live voice mode: inject text into the active WebSocket session ──
+  if (isConversationActive()) {
+    addChatBubble("question", msg);
+    sendTextInput(msg);
+    // Response arrives via conversation:message event — no further handling here
+    input.disabled = false;
+    $("btn-send").disabled = false;
+    input.focus();
+    return;
+  }
+
   const typingId = addTypingIndicator(suspect.name);
 
   try {
@@ -379,6 +541,103 @@ async function handleSendMessage() {
 function isAutoVoiceOn() {
   const toggle = $("btn-voice-toggle");
   return toggle && toggle.classList.contains("active");
+}
+
+// ─── Talk Button State ──────────────────────────────────────
+
+function setTalkButtonState(state) {
+  const btn = $("btn-talk");
+  if (!btn || btn.style.display === "none") return;
+
+  switch (state) {
+    case "idle":
+      btn.innerHTML = "&#127900; Talk";
+      btn.classList.remove("active", "btn-danger");
+      btn.title = "Start real-time voice conversation with this suspect";
+      break;
+    case "connecting":
+      btn.innerHTML = "Connecting...";
+      btn.classList.remove("active", "btn-danger");
+      break;
+    case "active":
+      btn.innerHTML = "&#9209; End";
+      btn.classList.add("active");
+      btn.title = "End voice conversation";
+      break;
+  }
+}
+
+// ─── ElevenLabs Conversation Events ────────────────────────
+
+function wireConversationEvents() {
+  let _lastUserText = "";
+
+  events.on('conversation:message', ({ text, source, suspectId }) => {
+    const suspect = store.suspects.find(s => s.id === suspectId);
+    const agent   = store.agents?.[suspectId];
+
+    if (source === 'user') {
+      _lastUserText = text;
+      addChatBubble("question", text);
+      return;
+    }
+
+    // AI response
+    if (agent && suspect) {
+      agent.updatePressure(_lastUserText);
+      agent.updateEmotionalState(_lastUserText);
+      agent.conversationHistory.push({ role: "user",      content: _lastUserText });
+      agent.conversationHistory.push({ role: "assistant", content: text });
+      store.caseData.questionCount++;
+
+      const clueData   = agent.analyzeResponse(_lastUserText, text);
+      const actionText = `*${suspect.name} ${getActionDescription(suspect, agent)}*`;
+
+      addChatBubble("system", actionText);
+      addChatBubble("answer", text, suspect.name, true);
+      addNote(store, suspect.name, text, clueData?.tag || "info");
+      if (clueData) detectContradiction(clueData);
+
+      renderSuspectList();
+      updateSuspectState();
+    } else {
+      addChatBubble("answer", text, suspect?.name || "Suspect", true);
+    }
+  });
+
+  events.on('conversation:connected', ({ suspectId }) => {
+    const name = store.suspects.find(s => s.id === suspectId)?.name || "suspect";
+    addChatBubble("system", `Voice session active — speak to interrogate ${name}.`);
+    setTalkButtonState("active");
+    const micBtn = $("btn-mic");
+    if (micBtn) { micBtn.classList.add("active"); micBtn.title = "Listening..."; }
+  });
+
+  events.on('conversation:disconnected', () => {
+    addChatBubble("system", "Voice session ended.");
+    setTalkButtonState("idle");
+    const micBtn = $("btn-mic");
+    if (micBtn) { micBtn.classList.remove("active"); micBtn.title = "Speech-to-Text"; }
+  });
+
+  events.on('conversation:mode', ({ mode }) => {
+    const micBtn = $("btn-mic");
+    if (!micBtn) return;
+    if (mode === 'speaking') {
+      micBtn.classList.remove("active");
+      micBtn.title = "Suspect is speaking...";
+    } else {
+      micBtn.classList.add("active");
+      micBtn.title = "Listening — speak now";
+    }
+  });
+
+  events.on('conversation:error', ({ error, suspectId }) => {
+    const name = store.suspects.find(s => s.id === suspectId)?.name || "suspect";
+    const msg  = typeof error === "string" ? error : (error?.message || JSON.stringify(error));
+    addChatBubble("system", `Voice session error (${name}): ${msg}`);
+    setTalkButtonState("idle");
+  });
 }
 
 function appendVoiceButton(bubbleEl, text, suspect) {

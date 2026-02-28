@@ -24,6 +24,7 @@ export function getConfig() {
       apiKey: cfg.apiKey || "",
       model: cfg.model || "mistral-small-latest",
       baseUrl: cfg.baseUrl || "",
+      region: cfg.region || "",
     },
     image: {
       enabled: !!cfg.falApiKey,
@@ -35,7 +36,15 @@ export function getConfig() {
       apiKey: cfg.elevenLabsApiKey || "",
       model: cfg.elevenLabsModel || "eleven_multilingual_v2",
     },
+    conversation: {
+      enabled: !!cfg.elevenLabsAgentId,
+      agentId: cfg.elevenLabsAgentId || "",
+    },
   };
+}
+
+export function isConversationEnabled() {
+  return getConfig().conversation.enabled;
 }
 
 // ─── LLM (Chat Completion) ─────────────────────────────────
@@ -47,6 +56,7 @@ function getLLMBaseUrl(llm) {
     mistral: "https://api.mistral.ai/v1",
     groq:    "https://api.groq.com/openai/v1",
     ollama:  "http://localhost:11434/v1",
+    bedrock: `https://bedrock-runtime.${llm.region || "us-west-2"}.amazonaws.com/openai/v1`,
   };
   return urls[llm.provider] || llm.baseUrl || "https://api.openai.com/v1";
 }
@@ -67,6 +77,7 @@ export async function chatCompletion(messages, opts = {}) {
       messages,
       max_tokens: opts.maxTokens || 300,
       temperature: opts.temperature || 0.8,
+      ...(opts.jsonMode ? { response_format: { type: "json_object" } } : {}),
     }),
   });
 
@@ -175,7 +186,17 @@ function scoreVoiceMatch(voiceLabels, suspect) {
   const tone = (suspect.voiceTone || "").toLowerCase();
   const trait = suspect.personality?.trait || "";
   const age = suspect.age || 40;
+  const gender = (suspect.gender || "").toLowerCase();
   const desc = Object.values(voiceLabels).join(" ").toLowerCase();
+  const voiceGender = (voiceLabels.gender || "").toLowerCase();
+
+  if (gender && voiceGender) {
+    if (voiceGender === gender) {
+      score += 20;
+    } else {
+      score -= 50;
+    }
+  }
 
   const toneKeywords = tone.split(/[\s,]+/).filter(w => w.length > 2);
   for (const kw of toneKeywords) {
@@ -211,12 +232,18 @@ export async function getVoiceIdForSuspect(suspect) {
   const available = voices.filter(v => !usedIds.has(v.id));
   const pool = available.length ? available : voices;
 
-  const scored = pool.map(v => ({ voice: v, score: scoreVoiceMatch(v.labels, suspect) }));
+  const gender = (suspect.gender || "").toLowerCase();
+  const genderPool = gender
+    ? pool.filter(v => (v.labels.gender || "").toLowerCase() === gender)
+    : [];
+  const finalPool = genderPool.length ? genderPool : pool;
+
+  const scored = finalPool.map(v => ({ voice: v, score: scoreVoiceMatch(v.labels, suspect) }));
   scored.sort((a, b) => b.score - a.score);
 
   const bestId = scored[0].voice.id;
   _suspectVoiceAssignments.set(suspect.id, bestId);
-  console.log(`[Voice] Assigned "${scored[0].voice.name}" to ${suspect.name} (tone: ${suspect.voiceTone})`);
+  console.log(`[Voice] Assigned "${scored[0].voice.name}" (${scored[0].voice.labels.gender || '?'}) to ${suspect.name} [${suspect.gender}] (tone: ${suspect.voiceTone})`);
   return bestId;
 }
 

@@ -784,6 +784,130 @@ h1, h2, h3, h4 { color: var(--text-bright); }
   50% { opacity: 1; }
 }
 
+/* ─── Clickable Crime Scene Thumbnail ─── */
+.scene-thumbnail {
+  cursor: zoom-in;
+  transition: transform .2s, box-shadow .2s;
+}
+.scene-thumbnail:hover {
+  transform: scale(1.03);
+  box-shadow: 0 0 16px rgba(233, 69, 96, .4);
+}
+
+/* ─── Crime Scene Lightbox ─── */
+.scene-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+  animation: fadeIn .25s;
+  padding: 2rem;
+}
+
+.scene-lightbox-inner {
+  position: relative;
+  max-width: 1100px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, .7);
+}
+
+.scene-lightbox-close {
+  position: absolute;
+  top: .6rem;
+  right: .8rem;
+  background: rgba(0, 0, 0, .6);
+  border: none;
+  color: #fff;
+  font-size: 1.6rem;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .2s;
+}
+.scene-lightbox-close:hover { background: var(--accent); }
+
+.scene-lightbox-img-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a1a;
+}
+
+.scene-lightbox-img-wrap img {
+  width: 100%;
+  height: auto;
+  max-height: 60vh;
+  object-fit: contain;
+  display: block;
+}
+
+.scene-lightbox-info {
+  padding: 1rem 1.4rem;
+  border-top: 1px solid var(--border);
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.scene-lightbox-info h3 {
+  font-size: 1rem;
+  margin-bottom: .4rem;
+  color: var(--accent);
+}
+
+.scene-lightbox-desc {
+  font-size: .85rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: .6rem;
+}
+
+.scene-lightbox-clues {
+  font-size: .8rem;
+  color: var(--text);
+}
+.scene-lightbox-clues strong {
+  display: block;
+  margin-bottom: .3rem;
+  color: var(--warning);
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.scene-lightbox-clues ul {
+  list-style: none;
+  padding: 0;
+}
+.scene-lightbox-clues li {
+  padding: .25rem 0 .25rem .8rem;
+  position: relative;
+  color: var(--text-dim);
+  font-size: .78rem;
+}
+.scene-lightbox-clues li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 960px) {
   .game-layout {
@@ -794,4 +918,6 @@ h1, h2, h3, h4 { color: var(--text-bright); }
   }
   .left-panel { max-height: 200px; }
   .case-images { flex-direction: column; }
+  .scene-lightbox { padding: .5rem; }
+  .scene-lightbox-inner { max-height: 95vh; }
 }

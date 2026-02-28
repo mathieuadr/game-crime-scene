@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bedrock API Test</title>
+<style>
+  body { font-family: monospace; background: #111; color: #eee; padding: 2rem; max-width: 800px; margin: 0 auto; }
+  h1 { color: #f90; }
+  button { background: #f90; border: none; padding: .6rem 1.4rem; font-size: 1rem; cursor: pointer; border-radius: 4px; margin: .4rem; }
+  textarea { width: 100%; background: #222; color: #eee; border: 1px solid #444; padding: .6rem; font-family: monospace; border-radius: 4px; box-sizing: border-box; }
+  #log { white-space: pre-wrap; background: #1a1a1a; border: 1px solid #333; padding: 1rem; border-radius: 4px; min-height: 200px; margin-top: 1rem; font-size: .85rem; }
+  .ok  { color: #4f4; }
+  .err { color: #f44; }
+  .inf { color: #48f; }
+  select, input { background: #222; color: #eee; border: 1px solid #444; padding: .4rem; border-radius: 4px; width: 100%; margin-bottom: .5rem; box-sizing: border-box; }
+  label { display: block; margin-top: .8rem; color: #aaa; font-size: .85rem; }
+</style>
+</head>
+<body>
+<h1>🔬 Bedrock API Test</h1>
+
+<label>API Key</label>
+<input id="apiKey" value="">
+
+<label>Region</label>
+<input id="region" value="us-west-2">
+
+<label>Model</label>
+<select id="model">
+  <option value="mistral.mistral-small-2402-v1:0">Mistral Small (24.02)</option>
+  <option value="mistral.mistral-large-2407-v1:0">Mistral Large (24.07)</option>
+  <option value="mistral.mistral-large-3-675b-instruct">Mistral Large 3</option>
+  <option value="mistral.mixtral-8x7b-instruct-v0:1">Mixtral 8x7B</option>
+  <option value="mistral.ministral-3-8b-instruct">Ministral 8B</option>
+  <option value="openai.gpt-oss-20b-1:0">OpenAI GPT OSS 20B</option>
+</select>
+
+<label>Message</label>
+<textarea id="msg" rows="2">Say hello in exactly 5 words.</textarea>
+
+<div>
+  <button onclick="testFetch()">▶ Test Chat Completion</button>
+  <button onclick="testCORS()">🌐 Test CORS preflight</button>
+  <button onclick="clearLog()">✕ Clear</button>
+</div>
+
+<div id="log">Waiting for test…</div>
+
+<script>
+const log = document.getElementById('log');
+
+function write(cls, msg) {
+  log.innerHTML += `<span class="${cls}">${escHtml(msg)}\n</span>`;
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function clearLog() { log.innerHTML = ''; }
+
+async function testFetch() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const region = document.getElementById('region').value.trim();
+  const model  = document.getElementById('model').value;
+  const msg    = document.getElementById('msg').value.trim();
+
+  const url = `https://bedrock-runtime.${region}.amazonaws.com/openai/v1/chat/completions`;
+
+  write('inf', `POST ${url}`);
+  write('inf', `Model: ${model}`);
+
+  const body = JSON.stringify({
+    model,
+    messages: [{ role: "user", content: msg }],
+    max_tokens: 100,
+  });
+
+  const t0 = Date.now();
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body,
+    });
+
+    const elapsed = Date.now() - t0;
+    write('inf', `Status: ${res.status} ${res.statusText} (${elapsed}ms)`);
+
+    const text = await res.text();
+
+    if (!res.ok) {
+      write('err', `Error body:\n${text}`);
+      return;
+    }
+
+    const data = JSON.parse(text);
+    const reply = data.choices?.[0]?.message?.content ?? '(no content)';
+    write('ok', `✅ Success!`);
+    write('ok', `Reply: ${reply}`);
+    write('inf', `Full response:\n${JSON.stringify(data, null, 2)}`);
+  } catch (err) {
+    const elapsed = Date.now() - t0;
+    write('err', `❌ Fetch failed (${elapsed}ms): ${err}`);
+    if (err.message.includes('Failed to fetch')) {
+      write('err', `\n⚠ This is likely a CORS error. Bedrock's runtime endpoint does not allow\n  cross-origin requests from browsers. You'll need a proxy.\n`);
+      write('inf', `Quick fix: use a local proxy or switch to a CORS-friendly provider.\nSee the CORS note at the bottom of this page.`);
+    }
+  }
+}
+
+async function testCORS() {
+  const region = document.getElementById('region').value.trim();
+  const url = `https://bedrock-runtime.${region}.amazonaws.com/openai/v1/chat/completions`;
+  write('inf', `OPTIONS preflight → ${url}`);
+  try {
+    const res = await fetch(url, { method: 'OPTIONS' });
+    write('ok', `Preflight ${res.status} — CORS headers:`);
+    for (const [k, v] of res.headers) {
+      if (k.toLowerCase().startsWith('access-control')) write('ok', `  ${k}: ${v}`);
+    }
+  } catch (err) {
+    write('err', `Preflight failed: ${err}`);
+    write('err', `Bedrock does not support browser-side CORS. A proxy is required.`);
+  }
+}
+</script>
+
+<hr style="border-color:#333;margin-top:2rem">
+<p style="color:#666;font-size:.8rem">
+<strong style="color:#aaa">CORS note:</strong> AWS Bedrock Runtime endpoints are not browser-accessible (no CORS headers).
+If you see "Failed to fetch", the fix is to add a tiny proxy. The simplest option is to run:<br><br>
+<code style="background:#222;padding:.3rem .6rem;border-radius:3px">npx local-cors-proxy --proxyUrl https://bedrock-runtime.us-west-2.amazonaws.com --port 8010</code><br><br>
+Then set <strong>baseUrl</strong> in config.js to <code>http://localhost:8010/openai/v1</code> and keep <strong>provider</strong> as <code>"openai"</code> (so the url map is bypassed).
+</p>
+</body>
+</html>

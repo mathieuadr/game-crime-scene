@@ -88,7 +88,7 @@
         <h2 id="header-case-info">Case #------</h2>
         <div class="header-actions">
           <span id="active-services"></span>
-          <button class="btn btn-sm btn-outline" id="btn-voice-toggle" title="Toggle auto-voice">&#128264; Voice</button>
+          <button class="btn btn-sm btn-outline" id="btn-voice-toggle" title="Toggle auto-voice (classic TTS)">&#128264; Voice</button>
           <button class="btn btn-sm btn-outline" id="btn-debug-toggle">Debug</button>
           <button class="btn btn-sm btn-outline" id="btn-new-case">New Case</button>
         </div>
@@ -146,7 +146,8 @@
           <div class="chat-log" id="chat-log"></div>
 
           <div class="chat-input-bar">
-            <button class="btn btn-sm btn-outline btn-mic" id="btn-mic" title="Hold to speak (Speech-to-Text)">&#127908;</button>
+            <button class="btn btn-sm btn-outline btn-mic" id="btn-mic" title="Speech-to-Text (fills text box)">&#127908;</button>
+            <button class="btn btn-sm btn-outline btn-talk" id="btn-talk" style="display:none" title="Start real-time voice conversation with this suspect">&#127900; Talk</button>
             <input type="text" id="chat-input" placeholder="Type or speak your question..." autocomplete="off">
             <button class="btn btn-sm btn-primary" id="btn-send">Send</button>
           </div>

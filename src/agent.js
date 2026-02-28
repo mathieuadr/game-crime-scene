@@ -75,7 +75,9 @@ You did NOT commit this crime. You don't know who the culprit is.
 
     const evidenceList = c.evidence.map(e => `- ${e.description}`).join("\n");
 
-    return `You are ${p.name}, a ${p.age}-year-old ${p.role}. You are being interrogated by a police inspector about the murder of ${victim.name} (${victim.occupation}, age ${victim.age}).
+    const genderLabel = p.gender === "female" ? "woman" : "man";
+
+    return `You are ${p.name}, a ${p.age}-year-old ${genderLabel} working as ${p.role}. You are being interrogated by a police inspector about the murder of ${victim.name} (${victim.occupation}, age ${victim.age}).
 
 The murder took place in ${c.crime.location} at approximately ${c.crime.time}. The weapon was ${c.crime.weapon}.
 
@@ -115,6 +117,11 @@ ${evidenceList}
 - Shoe size: ${p.physical.shoeSize}
 - Distinctive clothing color: ${p.physical.fabricColor}
 - Personal item: ${p.physical.personalItem}
+${p.appearance ? `- Hair: ${p.appearance.hair || "unremarkable"}
+- Build: ${p.appearance.build || "average"}
+- Face: ${p.appearance.face || "unremarkable"}
+- Notable detail: ${p.appearance.distinguishing || "none"}
+- Tonight's outfit: ${p.appearance.clothing || p.physical.fabricColor + " clothing"}` : ""}
 
 ${culpritBlock}
 

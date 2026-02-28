@@ -126,51 +126,34 @@
     <div class="log" id="roundtrip-log"></div>
   </div>
 
-  <!-- ═══ 6. Voxtral STT (Mistral API) ═══ -->
+  <!-- ═══ 6. Voxtral Realtime STT (Mistral WebSocket) ═══ -->
   <div class="card">
-    <h2>6. Speech-to-Text via Voxtral (Mistral API)</h2>
+    <h2>6. Realtime Speech-to-Text — Voxtral (Mistral WebSocket)</h2>
     <p style="font-size:.82rem;color:var(--dim);margin-bottom:.8rem">
-      Records audio from your mic, then sends it to Mistral's Voxtral model for transcription.
-      Uses your Mistral API key — no browser STT dependency.
+      Streams audio live to Mistral's Voxtral Realtime model via WebSocket.
+      Words appear as you speak — sub-200ms latency.
     </p>
     <label for="mistral-key">Mistral API Key (loaded from config.js)</label>
     <input type="password" id="mistral-key" placeholder="Your Mistral API key">
-    <label for="voxtral-model">Voxtral Model</label>
-    <input type="text" id="voxtral-model" value="voxtral-mini-latest">
-    <label for="voxtral-lang">Language hint (optional, improves accuracy)</label>
-    <select id="voxtral-lang">
-      <option value="">Auto-detect</option>
-      <option value="en">English</option>
-      <option value="fr">French</option>
-      <option value="es">Spanish</option>
-      <option value="de">German</option>
-      <option value="it">Italian</option>
-      <option value="pt">Portuguese</option>
-      <option value="zh">Chinese</option>
-      <option value="ja">Japanese</option>
-      <option value="ko">Korean</option>
-    </select>
     <div class="flex-gap" style="margin-bottom:.8rem">
-      <button class="btn-outline btn-mic" id="btn-voxtral-mic">&#127908;</button>
-      <button class="btn-danger" id="btn-voxtral-stop" disabled style="border-radius:50%;width:48px;height:48px;font-size:.7rem">Stop</button>
+      <button class="btn-outline btn-mic" id="btn-voxtral-rt">&#127908;</button>
       <div style="flex:1">
-        <div style="font-size:.8rem;color:var(--dim);margin-bottom:.3rem">Click mic to record, then Stop to transcribe:</div>
-        <div id="voxtral-transcript" style="min-height:50px;padding:.6rem;background:#0f3460;border:1px solid var(--border);border-radius:6px;font-size:.9rem">...</div>
+        <div style="font-size:.8rem;color:var(--dim);margin-bottom:.3rem">Click mic to start. Words appear live as you speak:</div>
+        <div id="voxtral-rt-transcript" style="min-height:60px;padding:.6rem;background:#0f3460;border:1px solid var(--border);border-radius:6px;font-size:.9rem">...</div>
       </div>
     </div>
-    <div id="voxtral-status"></div>
-    <div class="log" id="voxtral-log"></div>
+    <div id="voxtral-rt-status"></div>
+    <div class="log" id="voxtral-rt-log"></div>
   </div>
 
-  <!-- ═══ 7. Full Round-Trip with Voxtral ═══ -->
+  <!-- ═══ 7. Full Round-Trip with Voxtral Realtime ═══ -->
   <div class="card">
-    <h2>7. Round-Trip: Voxtral STT → ElevenLabs TTS</h2>
+    <h2>7. Round-Trip: Voxtral Realtime STT → ElevenLabs TTS</h2>
     <p style="font-size:.82rem;color:var(--dim);margin-bottom:.8rem">
-      Record your voice → Voxtral transcribes it → ElevenLabs speaks the reply with the selected voice.
+      Speak live → Voxtral transcribes in real time → click Stop → ElevenLabs reads back the reply.
     </p>
     <div class="flex-gap">
-      <button class="btn-primary btn-mic" id="btn-roundtrip-voxtral">&#127908; Record</button>
-      <button class="btn-danger" id="btn-roundtrip-voxtral-stop" disabled style="border-radius:6px">Stop & Transcribe</button>
+      <button class="btn-primary btn-mic" id="btn-roundtrip-voxtral">&#127908; Start</button>
     </div>
     <div id="roundtrip-voxtral-status"></div>
     <div class="log" id="roundtrip-voxtral-log"></div>
@@ -496,235 +479,308 @@
       );
     });
 
-    // ═══ 6. Voxtral STT (Mistral API) ══════════════════════
-    let mediaRecorder = null;
-    let audioChunks = [];
-
+    // ═══ 6. Voxtral Realtime STT (WebSocket) ═════════════════
     function getMistralKey() { return $("mistral-key").value.trim(); }
 
-    async function startRecording() {
-      audioChunks = [];
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+    const TARGET_SAMPLE_RATE = 16000;
+    let voxtralWs = null;
+    let voxtralAudioCtx = null;
+    let voxtralMicStream = null;
+    let voxtralProcessor = null;
+    let voxtralFullText = "";
 
-      mediaRecorder.addEventListener("dataavailable", (e) => {
-        if (e.data.size > 0) audioChunks.push(e.data);
-      });
-
-      mediaRecorder.start();
-      return stream;
+    function float32ToPcm16Base64(float32Array) {
+      const int16 = new Int16Array(float32Array.length);
+      for (let i = 0; i < float32Array.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32Array[i]));
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      const bytes = new Uint8Array(int16.buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
     }
 
-    function stopRecording() {
-      return new Promise((resolve) => {
-        if (!mediaRecorder || mediaRecorder.state === "inactive") { resolve(null); return; }
-        mediaRecorder.addEventListener("stop", () => {
-          const blob = new Blob(audioChunks, { type: "audio/webm" });
-          mediaRecorder.stream.getTracks().forEach(t => t.stop());
-          mediaRecorder = null;
-          audioChunks = [];
-          resolve(blob);
-        });
-        mediaRecorder.stop();
-      });
+    function downsample(buffer, inputRate, outputRate) {
+      if (inputRate === outputRate) return buffer;
+      const ratio = inputRate / outputRate;
+      const newLength = Math.round(buffer.length / ratio);
+      const result = new Float32Array(newLength);
+      for (let i = 0; i < newLength; i++) {
+        const srcIdx = i * ratio;
+        const lo = Math.floor(srcIdx);
+        const hi = Math.min(lo + 1, buffer.length - 1);
+        const frac = srcIdx - lo;
+        result[i] = buffer[lo] * (1 - frac) + buffer[hi] * frac;
+      }
+      return result;
     }
 
-    async function transcribeWithVoxtral(audioBlob, logEl) {
+    async function startVoxtralRealtime(transcriptEl, statusEl, logEl, onTextUpdate) {
       const key = getMistralKey();
       if (!key) throw new Error("No Mistral API key.");
 
-      const model = $("voxtral-model").value || "voxtral-mini-latest";
-      const lang = $("voxtral-lang").value || undefined;
+      voxtralFullText = "";
+      transcriptEl.textContent = "";
 
-      log(logEl, `Uploading audio (${(audioBlob.size / 1024).toFixed(1)} KB) to Voxtral...`);
+      const wsUrl = `wss://api.mistral.ai/v1/audio/transcriptions/realtime?api_key=${encodeURIComponent(key)}`;
 
-      const formData = new FormData();
-      formData.append("file", audioBlob, "recording.webm");
-      formData.append("model", model);
-      if (lang) formData.append("language", lang);
+      log(logEl, "Connecting WebSocket to Mistral...");
+      log(logEl, `URL: wss://api.mistral.ai/v1/audio/transcriptions/realtime`);
+      setStatus(statusEl, "status-wait", "Connecting...");
 
-      const startTime = performance.now();
-      const res = await fetch("https://api.mistral.ai/v1/audio/transcriptions", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${key}` },
-        body: formData,
+      voxtralWs = new WebSocket(wsUrl);
+
+      return new Promise((resolve, reject) => {
+        let sessionReady = false;
+        let gotError = false;
+
+        voxtralWs.addEventListener("open", () => {
+          log(logEl, "WebSocket connected. Sending session config...");
+          voxtralWs.send(JSON.stringify({
+            type: "session.update",
+            session: {
+              model: "voxtral-mini-transcribe-realtime-2602",
+              audio_format: { encoding: "pcm_s16le", sample_rate: TARGET_SAMPLE_RATE },
+              language: "en",
+            },
+          }));
+        });
+
+        voxtralWs.addEventListener("message", (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            log(logEl, `← ${msg.type || "unknown"}`);
+
+            if (msg.type === "session.created" || msg.type === "session.updated") {
+              log(logEl, `Session ready (id: ${msg.session?.requestId || msg.session?.id || "?"})`);
+              sessionReady = true;
+              setStatus(statusEl, "status-ok", "Listening — speak now! Words appear live.");
+              startMicCapture(logEl);
+              resolve();
+
+            } else if (msg.type === "transcription.text.delta") {
+              voxtralFullText += msg.text;
+              transcriptEl.textContent = voxtralFullText;
+              if (onTextUpdate) onTextUpdate(voxtralFullText);
+
+            } else if (msg.type === "transcription.done") {
+              log(logEl, `Transcription done. Final: "${voxtralFullText}"`);
+
+            } else if (msg.type === "error") {
+              const errMsg = typeof msg.error?.message === "string" ? msg.error.message : JSON.stringify(msg.error);
+              log(logEl, `ERROR from server: ${errMsg}`);
+              setStatus(statusEl, "status-err", errMsg);
+              if (!sessionReady) reject(new Error(errMsg));
+
+            } else {
+              log(logEl, `Event data: ${JSON.stringify(msg).slice(0, 200)}`);
+            }
+          } catch (err) {
+            log(logEl, `Parse error: ${err.message} | raw: ${String(e.data).slice(0, 200)}`);
+          }
+        });
+
+        voxtralWs.addEventListener("error", (e) => {
+          gotError = true;
+          log(logEl, "WebSocket error event (browser gives no details — see close code below).");
+        });
+
+        voxtralWs.addEventListener("close", (e) => {
+          const codeHints = {
+            1000: "Normal closure",
+            1001: "Server going away",
+            1002: "Protocol error",
+            1003: "Unsupported data",
+            1006: "Connection failed (server rejected upgrade, network error, or invalid URL/key)",
+            1008: "Policy violation (likely auth rejected)",
+            1011: "Server internal error",
+          };
+          const hint = codeHints[e.code] || "";
+          log(logEl, `WebSocket closed — code: ${e.code}${hint ? ` (${hint})` : ""}, reason: "${e.reason || "none"}"`);
+          if (!sessionReady) {
+            const msg = gotError
+              ? `WebSocket connection failed (code ${e.code}). ${hint}. Check your Mistral API key and that your plan includes realtime audio.`
+              : `WebSocket closed unexpectedly (code ${e.code}): ${e.reason || hint}`;
+            setStatus(statusEl, "status-err", msg);
+            reject(new Error(msg));
+          }
+        });
       });
-
-      const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Voxtral API ${res.status}: ${errText}`);
-      }
-
-      const data = await res.json();
-      log(logEl, `Transcribed in ${elapsed}s (model: ${data.model}, lang: ${data.language})`);
-      if (data.usage) {
-        log(logEl, `Usage: ${data.usage.prompt_audio_seconds}s audio → ${data.usage.completion_tokens} tokens`);
-      }
-      return data.text || "";
     }
 
-    // Section 6: Record + Transcribe
-    let voxtralStream = null;
+    async function startMicCapture(logEl) {
+      voxtralMicStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: TARGET_SAMPLE_RATE, channelCount: 1 } });
+      voxtralAudioCtx = new AudioContext({ sampleRate: voxtralMicStream.getAudioTracks()[0].getSettings().sampleRate || 44100 });
+      const source = voxtralAudioCtx.createMediaStreamSource(voxtralMicStream);
 
-    $("btn-voxtral-mic").addEventListener("click", async () => {
-      const btn = $("btn-voxtral-mic");
-      const stopBtn = $("btn-voxtral-stop");
-      const vLog = $("voxtral-log");
+      const bufferSize = 4096;
+      voxtralProcessor = voxtralAudioCtx.createScriptProcessor(bufferSize, 1, 1);
+
+      voxtralProcessor.onaudioprocess = (e) => {
+        if (!voxtralWs || voxtralWs.readyState !== WebSocket.OPEN) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+        const resampled = downsample(inputData, voxtralAudioCtx.sampleRate, TARGET_SAMPLE_RATE);
+        const base64 = float32ToPcm16Base64(resampled);
+        voxtralWs.send(JSON.stringify({ type: "input_audio.append", audio: base64 }));
+      };
+
+      source.connect(voxtralProcessor);
+      voxtralProcessor.connect(voxtralAudioCtx.destination);
+      log(logEl, `Mic capturing at ${voxtralAudioCtx.sampleRate}Hz → resampling to ${TARGET_SAMPLE_RATE}Hz`);
+    }
+
+    function stopVoxtralRealtime(logEl) {
+      if (voxtralProcessor) {
+        voxtralProcessor.disconnect();
+        voxtralProcessor = null;
+      }
+      if (voxtralAudioCtx) {
+        voxtralAudioCtx.close();
+        voxtralAudioCtx = null;
+      }
+      if (voxtralMicStream) {
+        voxtralMicStream.getTracks().forEach(t => t.stop());
+        voxtralMicStream = null;
+      }
+      if (voxtralWs && voxtralWs.readyState === WebSocket.OPEN) {
+        try {
+          voxtralWs.send(JSON.stringify({ type: "input_audio.end" }));
+        } catch (_) {}
+        setTimeout(() => { if (voxtralWs) voxtralWs.close(); }, 500);
+      }
+      voxtralWs = null;
+      if (logEl) log(logEl, "Stopped mic + WebSocket.");
+    }
+
+    // Section 6 UI
+    let voxtralRtActive = false;
+
+    $("btn-voxtral-rt").addEventListener("click", async () => {
+      const btn = $("btn-voxtral-rt");
+      const vLog = $("voxtral-rt-log");
+      const statusEl = $("voxtral-rt-status");
+      const transcriptEl = $("voxtral-rt-transcript");
+
+      if (voxtralRtActive) {
+        voxtralRtActive = false;
+        btn.classList.remove("active");
+        stopVoxtralRealtime(vLog);
+        setStatus(statusEl, "status-ok", `Done: "${voxtralFullText.slice(0, 80)}${voxtralFullText.length > 80 ? "..." : ""}"`);
+        return;
+      }
 
       if (!getMistralKey()) {
-        setStatus($("voxtral-status"), "status-err", "Enter your Mistral API key first.");
+        setStatus(statusEl, "status-err", "Enter your Mistral API key first.");
         return;
       }
 
       try {
         btn.classList.add("active");
-        btn.disabled = true;
-        stopBtn.disabled = false;
-        $("voxtral-transcript").textContent = "Recording...";
-        setStatus($("voxtral-status"), "status-wait", "Recording — speak now, then click Stop.");
-        log(vLog, "Recording started...");
-
-        voxtralStream = await startRecording();
+        voxtralRtActive = true;
+        await startVoxtralRealtime(transcriptEl, statusEl, vLog);
       } catch (err) {
         btn.classList.remove("active");
-        btn.disabled = false;
-        setStatus($("voxtral-status"), "status-err", `Mic error: ${err.message}`);
+        voxtralRtActive = false;
+        setStatus(statusEl, "status-err", `Failed: ${err.message}`);
         log(vLog, `ERROR: ${err.message}`);
+        stopVoxtralRealtime(vLog);
       }
     });
 
-    $("btn-voxtral-stop").addEventListener("click", async () => {
-      const btn = $("btn-voxtral-mic");
-      const stopBtn = $("btn-voxtral-stop");
-      const vLog = $("voxtral-log");
-
-      stopBtn.disabled = true;
-      btn.classList.remove("active");
-      setStatus($("voxtral-status"), "status-wait", "Transcribing...");
-      log(vLog, "Recording stopped. Sending to Voxtral...");
-
-      try {
-        const blob = await stopRecording();
-        if (!blob || blob.size === 0) {
-          setStatus($("voxtral-status"), "status-err", "No audio recorded.");
-          btn.disabled = false;
-          return;
-        }
-
-        const text = await transcribeWithVoxtral(blob, vLog);
-        $("voxtral-transcript").textContent = text || "(no speech detected)";
-        log(vLog, `Result: "${text}"`);
-        setStatus($("voxtral-status"), "status-ok", `Transcription complete: "${text.slice(0, 80)}${text.length > 80 ? "..." : ""}"`);
-      } catch (err) {
-        setStatus($("voxtral-status"), "status-err", err.message);
-        log(vLog, `ERROR: ${err.message}`);
-      }
-
-      btn.disabled = false;
-    });
-
-    // ═══ 7. Round-Trip: Voxtral STT → ElevenLabs TTS ════════
-    let rtVoxtralRecording = false;
+    // ═══ 7. Round-Trip: Voxtral Realtime → ElevenLabs TTS ════
+    let rtVoxtralActive = false;
 
     $("btn-roundtrip-voxtral").addEventListener("click", async () => {
       const btn = $("btn-roundtrip-voxtral");
-      const stopBtn = $("btn-roundtrip-voxtral-stop");
       const rtLog = $("roundtrip-voxtral-log");
+      const statusEl = $("roundtrip-voxtral-status");
 
-      if (!getMistralKey()) {
-        setStatus($("roundtrip-voxtral-status"), "status-err", "Enter your Mistral API key (section 6).");
-        return;
-      }
-      if (!selectedVoiceId) {
-        setStatus($("roundtrip-voxtral-status"), "status-err", "Select an ElevenLabs voice first (section 2).");
-        return;
-      }
-
-      try {
-        btn.classList.add("active");
-        btn.disabled = true;
-        stopBtn.disabled = false;
-        rtVoxtralRecording = true;
-        setStatus($("roundtrip-voxtral-status"), "status-wait", "Recording — speak your question, then click Stop.");
-        log(rtLog, "--- Voxtral round-trip started ---");
-
-        await startRecording();
-      } catch (err) {
+      if (rtVoxtralActive) {
+        rtVoxtralActive = false;
         btn.classList.remove("active");
-        btn.disabled = false;
-        setStatus($("roundtrip-voxtral-status"), "status-err", `Mic error: ${err.message}`);
-      }
-    });
+        btn.innerHTML = "&#127908; Start";
+        stopVoxtralRealtime(rtLog);
 
-    $("btn-roundtrip-voxtral-stop").addEventListener("click", async () => {
-      const btn = $("btn-roundtrip-voxtral");
-      const stopBtn = $("btn-roundtrip-voxtral-stop");
-      const rtLog = $("roundtrip-voxtral-log");
-
-      stopBtn.disabled = true;
-      btn.classList.remove("active");
-      rtVoxtralRecording = false;
-
-      setStatus($("roundtrip-voxtral-status"), "status-wait", "Transcribing with Voxtral...");
-      log(rtLog, "Recording stopped. Transcribing...");
-
-      try {
-        const blob = await stopRecording();
-        if (!blob || blob.size === 0) {
-          setStatus($("roundtrip-voxtral-status"), "status-err", "No audio recorded.");
-          btn.disabled = false;
-          return;
-        }
-
-        const transcript = await transcribeWithVoxtral(blob, rtLog);
-        log(rtLog, `You said: "${transcript}"`);
-
+        const transcript = voxtralFullText.trim();
         if (!transcript) {
-          setStatus($("roundtrip-voxtral-status"), "status-err", "No speech detected.");
-          btn.disabled = false;
+          setStatus(statusEl, "status-err", "No speech detected.");
           return;
         }
 
-        setStatus($("roundtrip-voxtral-status"), "status-wait", `Transcribed: "${transcript}" — generating TTS reply...`);
+        log(rtLog, `Final transcript: "${transcript}"`);
+        setStatus(statusEl, "status-wait", `Transcribed: "${transcript.slice(0, 50)}..." — generating TTS reply...`);
+
+        if (!selectedVoiceId) {
+          setStatus(statusEl, "status-err", "Select an ElevenLabs voice first (section 2).");
+          return;
+        }
 
         const replyText = `You asked: ${transcript}. Well, Inspector, I can assure you that I have a perfectly reasonable explanation for that.`;
         log(rtLog, `TTS reply: "${replyText}"`);
 
-        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "xi-api-key": getApiKey() },
-          body: JSON.stringify({
-            text: replyText,
-            model_id: $("tts-model").value,
-            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-          }),
-        });
+        try {
+          const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "xi-api-key": getApiKey() },
+            body: JSON.stringify({
+              text: replyText,
+              model_id: $("tts-model").value,
+              voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+            }),
+          });
 
-        if (!res.ok) {
-          throw new Error(`TTS failed: ${res.status}`);
+          if (!res.ok) throw new Error(`TTS failed: ${res.status}`);
+
+          const audioBlob = await res.blob();
+          const url = URL.createObjectURL(audioBlob);
+          log(rtLog, `Audio ready (${(audioBlob.size / 1024).toFixed(1)} KB) — playing...`);
+          setStatus(statusEl, "status-ok", "Playing response...");
+
+          stopAudio();
+          currentAudio = new Audio(url);
+          currentAudio.addEventListener("ended", () => {
+            log(rtLog, "Round-trip complete!");
+            setStatus(statusEl, "status-ok", "Round-trip complete!");
+            currentAudio = null;
+          });
+          currentAudio.play();
+        } catch (err) {
+          log(rtLog, `ERROR: ${err.message}`);
+          setStatus(statusEl, "status-err", err.message);
         }
-
-        const audioBlob = await res.blob();
-        const url = URL.createObjectURL(audioBlob);
-        log(rtLog, `Audio ready (${(audioBlob.size / 1024).toFixed(1)} KB) — playing...`);
-        setStatus($("roundtrip-voxtral-status"), "status-ok", "Playing response...");
-
-        stopAudio();
-        currentAudio = new Audio(url);
-        currentAudio.addEventListener("ended", () => {
-          log(rtLog, "Voxtral round-trip complete!");
-          setStatus($("roundtrip-voxtral-status"), "status-ok", "Round-trip complete!");
-          currentAudio = null;
-        });
-        currentAudio.play();
-      } catch (err) {
-        log(rtLog, `ERROR: ${err.message}`);
-        setStatus($("roundtrip-voxtral-status"), "status-err", err.message);
+        return;
       }
 
-      btn.disabled = false;
+      if (!getMistralKey()) {
+        setStatus(statusEl, "status-err", "Enter your Mistral API key (section 6).");
+        return;
+      }
+      if (!selectedVoiceId) {
+        setStatus(statusEl, "status-err", "Select an ElevenLabs voice first (section 2).");
+        return;
+      }
+
+      try {
+        btn.classList.add("active");
+        btn.innerHTML = "&#128308; Stop & Send";
+        rtVoxtralActive = true;
+        log(rtLog, "--- Voxtral realtime round-trip started ---");
+
+        const transcriptEl = document.createElement("div");
+        transcriptEl.style.cssText = "padding:.4rem;font-size:.8rem;color:var(--text);margin-top:.4rem";
+        $("roundtrip-voxtral-status").innerHTML = "";
+        $("roundtrip-voxtral-status").appendChild(transcriptEl);
+
+        await startVoxtralRealtime(transcriptEl, $("roundtrip-voxtral-status"), rtLog);
+        setStatus($("roundtrip-voxtral-status"), "status-ok", "Listening... click Stop & Send when done.");
+      } catch (err) {
+        btn.classList.remove("active");
+        btn.innerHTML = "&#127908; Start";
+        rtVoxtralActive = false;
+        setStatus(statusEl, "status-err", `Failed: ${err.message}`);
+        stopVoxtralRealtime(rtLog);
+      }
     });
   </script>
 </body>
