@@ -32,12 +32,14 @@ export function addChatBubble(type, text, speaker = "", isLLM = false) {
   const log = $("chat-log");
   const div = document.createElement("div");
   div.className = `chat-bubble ${type}`;
+
   if (speaker && type === "answer") {
     const badge = isLLM ? '<span class="llm-badge">AI</span>' : '';
-    div.innerHTML = `<span class="speaker">${escapeHtml(speaker)} ${badge}</span>${escapeHtml(text)}`;
+    div.innerHTML = `<span class="speaker">${escapeHtml(speaker)} ${badge}</span><span class="bubble-text">${escapeHtml(text)}</span>`;
   } else {
     div.textContent = text;
   }
+
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
   return div;
@@ -67,6 +69,11 @@ export function addNote(store, title, text, tag) {
 
   const entry = document.createElement("div");
   entry.className = "note-entry";
+
+  if (tag === "contradiction") {
+    entry.classList.add("contradiction-flash");
+  }
+
   entry.innerHTML = `
     <div class="note-time">${time}</div>
     <div class="note-text"><span class="note-tag tag-${tag}">${tag.toUpperCase()}</span> <strong>${escapeHtml(title)}:</strong> ${escapeHtml(text)}</div>

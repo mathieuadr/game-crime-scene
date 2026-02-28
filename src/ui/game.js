@@ -11,6 +11,8 @@ import { checkConsistency, evaluateAccusation } from '../engine.js';
 import { getConfig, isLLMEnabled, isImageEnabled, isVoiceEnabled, generateImage, playSuspectVoice, stopVoice, clearVoiceAssignments, isSTTSupported, isSTTActive, startSTT, stopSTT } from '../services.js';
 import { $, show, hide, setText, escapeHtml, addChatBubble, addTypingIndicator, removeTypingIndicator, addNote } from './helpers.js';
 import { showSetupScreen } from './setup.js';
+import { soundManager } from './sound.js';
+import { shakeElement, flashEdge, typewriterChat } from './animations.js';
 
 let _buttonsWired = false;
 
@@ -49,10 +51,24 @@ function wireGameButtons() {
     const s = store.selectedSuspect;
     if (s) sendFromButton(`Do you have your ${s.physical.personalItem} with you?`);
   });
-  $("btn-ask-confront").addEventListener("click", () =>
-    sendFromButton("How do you explain the evidence found at the crime scene that points to you?"));
-  $("btn-ask-secret").addEventListener("click", () =>
-    sendFromButton("I know you're hiding something. What aren't you telling me?"));
+
+  $("btn-ask-confront").addEventListener("click", () => {
+    soundManager.play('key-click');
+    flashEdge('#8B1A1A', { duration: 200 });
+    shakeElement($("btn-ask-confront"));
+    sendFromButton("How do you explain the evidence found at the crime scene that points to you?");
+  });
+
+  $("btn-ask-secret").addEventListener("click", () => {
+    soundManager.play('key-click');
+    sendFromButton("I know you're hiding something. What aren't you telling me?");
+  });
+
+  document.querySelectorAll('.btn-keycap').forEach(btn => {
+    if (btn.id !== 'btn-ask-confront' && btn.id !== 'btn-ask-secret') {
+      btn.addEventListener("click", () => soundManager.play('key-click'));
+    }
+  });
 
   const input = $("chat-input");
   const sendBtn = $("btn-send");
@@ -61,8 +77,6 @@ function wireGameButtons() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
   });
 
-  $("btn-accuse").addEventListener("click", makeAccusation);
-  $("btn-reveal").addEventListener("click", revealSolution);
   $("btn-new-case").addEventListener("click", () => showSetupScreen());
 
   $("btn-debug-toggle").addEventListener("click", () => {
@@ -110,6 +124,20 @@ function wireGameButtons() {
     const btn = $("btn-mic");
     if (btn) btn.classList.remove("active");
   });
+
+  // Wire mute button in game header
+  const muteBtn = $("btn-mute");
+  if (muteBtn) {
+    if (soundManager.isMuted()) {
+      muteBtn.classList.add('muted');
+      muteBtn.innerHTML = '&#128263;';
+    }
+    muteBtn.addEventListener("click", () => {
+      const muted = soundManager.toggleMute();
+      muteBtn.classList.toggle('muted', muted);
+      muteBtn.innerHTML = muted ? '&#128263;' : '&#128264;';
+    });
+  }
 }
 
 function toggleMic() {
@@ -222,8 +250,11 @@ async function generateSuspectPortrait(suspect) {
 function onImageReady({ cacheKey, url }) {
   const match = cacheKey?.match(/^portrait_(suspect_\d+)$/);
   if (match) {
-    const avatarEl = document.querySelector(`[data-portrait="${match[1]}"]`);
-    if (avatarEl) avatarEl.style.backgroundImage = `url(${url})`;
+    const photoEl = document.querySelector(`[data-portrait="${match[1]}"] img`);
+    if (photoEl) {
+      photoEl.src = url;
+      photoEl.style.display = 'block';
+    }
   }
 }
 
@@ -234,7 +265,7 @@ function clearAssetPanels() {
   if (weaponEl) weaponEl.innerHTML = '';
 }
 
-// ─── Suspect List ───────────────────────────────────────────
+// ─── Suspect List (Polaroid Cards) ──────────────────────────
 
 function renderSuspectList() {
   const list = $("suspect-list");
@@ -243,19 +274,45 @@ function renderSuspectList() {
     const agent = store.agents[s.id];
     const qCount = agent ? agent.conversationHistory.filter(m => m.role === "user").length : 0;
     const portrait = store.assets.suspectPortraits[s.id];
+    const stress = agent ? agent.emotionalState.stress : 0;
+    const isInterrogated = qCount > 0;
+
+    const stressLevel = stress > 0.7 ? 'high' : stress > 0.35 ? 'medium' : 'low';
+    const stressPulsing = stress > 0.7 ? 'pulsing' : '';
 
     const li = document.createElement("li");
-    li.className = "suspect-item" + (store.selectedSuspectId === s.id ? " active" : "");
+    li.className = `suspect-item${store.selectedSuspectId === s.id ? ' active' : ''}${isInterrogated ? ' interrogated' : ''}`;
     li.innerHTML = `
-      <div class="suspect-avatar" data-portrait="${s.id}" style="background:${AVATAR_COLORS[i % AVATAR_COLORS.length]};${portrait ? `background-image:url(${portrait});background-size:cover;` : ''}">
-        ${portrait ? '' : s.firstName[0]}
+      <div class="suspect-photo" data-portrait="${s.id}">
+        ${portrait
+          ? `<img src="${portrait}" alt="${s.name}">`
+          : `<span class="avatar-letter" style="color:${AVATAR_COLORS[i % AVATAR_COLORS.length]}">${s.firstName[0]}</span>`
+        }
+        <span class="suspect-stamp stamp-suspect">Suspect</span>
       </div>
-      <div class="suspect-info">
-        <div class="suspect-name">${s.name}</div>
-        <div class="suspect-trait">${s.role} · ${s.personality.trait} ${qCount > 0 ? `· <span style="color:var(--text-dim)">${qCount}Q</span>` : ""}</div>
+      <div class="suspect-name">${escapeHtml(s.name)}</div>
+      <div class="suspect-role">${escapeHtml(s.role)} · ${escapeHtml(s.personality.trait)}</div>
+      <div class="suspicion-bar">
+        <div class="suspicion-fill level-${stressLevel} ${stressPulsing}" style="width:${Math.round(stress * 100)}%"></div>
+      </div>
+      ${qCount > 0 ? `<div class="suspect-qcount">${qCount} question${qCount > 1 ? 's' : ''}</div>` : ''}
+      <div class="suspect-actions">
+        <button class="btn btn-xs btn-danger btn-accuse-card" data-suspect-id="${s.id}">Accuse!</button>
+        <button class="btn btn-xs btn-outline btn-reveal-card">Reveal</button>
       </div>
     `;
-    li.addEventListener("click", () => store.selectSuspect(s.id));
+    li.querySelector('.btn-accuse-card').addEventListener('click', (e) => {
+      e.stopPropagation();
+      makeAccusation(s.id);
+    });
+    li.querySelector('.btn-reveal-card').addEventListener('click', (e) => {
+      e.stopPropagation();
+      revealSolution();
+    });
+    li.addEventListener("click", () => {
+      soundManager.play('paper-rustle');
+      store.selectSuspect(s.id);
+    });
     list.appendChild(li);
   });
 }
@@ -312,13 +369,6 @@ function populateDropdowns() {
     timeSelect.appendChild(opt);
   }
 
-  const accuseSelect = $("select-accuse");
-  accuseSelect.innerHTML = "";
-  store.suspects.forEach(s => {
-    const opt = document.createElement("option");
-    opt.value = s.id; opt.textContent = s.name;
-    accuseSelect.appendChild(opt);
-  });
 }
 
 // ─── Interrogation ──────────────────────────────────────────
@@ -351,6 +401,12 @@ async function handleSendMessage() {
     addChatBubble("system", actionText);
 
     const bubbleEl = addChatBubble("answer", result.text, suspect.name, result.isLLM);
+
+    // Typewriter reveal for suspect's answer
+    const contentEl = bubbleEl.querySelector('.bubble-text');
+    if (contentEl) {
+      await typewriterChat(contentEl, result.text, { speed: 20, soundEvery: 4 });
+    }
 
     if (isVoiceEnabled() && isAutoVoiceOn()) {
       appendVoiceButton(bubbleEl, result.text, suspect);
@@ -414,11 +470,14 @@ function detectContradiction(clueData) {
   if (!clueData || !store.caseData) return;
   const { caseData, suspects } = store;
 
+  let foundContradiction = false;
+
   if (clueData.type === "alibi_claim" && clueData.isFalse) {
     const conflicting = caseData.evidence.filter(e => e.pointsTo === clueData.suspectId && e.strength !== "weak");
     if (conflicting.length > 0) {
       const suspect = suspects.find(s => s.id === clueData.suspectId);
       addNote(store, "CONTRADICTION", `${suspect.name} claims to have been in ${clueData.claimedLocation} at ${TIME_LABELS[clueData.time]}, but physical evidence suggests otherwise!`, "contradiction");
+      foundContradiction = true;
     }
   }
 
@@ -426,6 +485,7 @@ function detectContradiction(clueData) {
     if (caseData.evidence.some(e => e.description.includes("footprint"))) {
       const suspect = suspects.find(s => s.id === clueData.suspectId);
       addNote(store, "CONTRADICTION", `${suspect.name} claims shoe size ${clueData.claimedSize}, but the footprint is size ${clueData.actualSize}.`, "contradiction");
+      foundContradiction = true;
     }
   }
 
@@ -433,6 +493,7 @@ function detectContradiction(clueData) {
     if (caseData.evidence.some(e => e.description.includes(clueData.item))) {
       const suspect = suspects.find(s => s.id === clueData.suspectId);
       addNote(store, "KEY CLUE", `${suspect.name} admits their ${clueData.item} is missing — one was found at the crime scene!`, "contradiction");
+      foundContradiction = true;
     }
   }
 
@@ -440,6 +501,7 @@ function detectContradiction(clueData) {
     if (caseData.evidence.some(e => e.description.includes(clueData.item))) {
       const suspect = suspects.find(s => s.id === clueData.suspectId);
       addNote(store, "SUSPICIOUS", `${suspect.name} claims their ${clueData.item} is elsewhere, but one was found at the scene.`, "contradiction");
+      foundContradiction = true;
     }
   }
 
@@ -447,12 +509,24 @@ function detectContradiction(clueData) {
     const suspect = suspects.find(s => s.id === clueData.suspectId);
     addNote(store, "SECRET", `${suspect.name} revealed: ${clueData.secretText}`, "evidence");
   }
+
+  if (foundContradiction) {
+    flashEdge('#8B1A1A', { duration: 300 });
+    soundManager.play('alarm');
+
+    const notesPanel = $("notes-panel");
+    if (notesPanel) {
+      notesPanel.classList.add('flash-border');
+      setTimeout(() => notesPanel.classList.remove('flash-border'), 600);
+    }
+  }
 }
 
 // ─── Accusation & Result ────────────────────────────────────
 
-function makeAccusation() {
-  const accusedId = $("select-accuse").value;
+function makeAccusation(suspectId) {
+  const accusedId = suspectId || $("select-accuse")?.value;
+  if (!accusedId) return;
   const result = evaluateAccusation(store.caseData, accusedId);
   const accused = store.suspects.find(s => s.id === accusedId);
   const culprit = store.suspects.find(s => s.id === store.caseData.culpritId);
@@ -464,7 +538,7 @@ function showModal(correct, accused, culprit, result) {
   overlay.className = "modal-overlay";
   const icon = correct ? "&#10003;" : "&#10007;";
   const title = correct ? "Case Solved!" : "Wrong Suspect!";
-  const color = correct ? "var(--success)" : "var(--danger)";
+  const color = correct ? "var(--cleared)" : "var(--blood)";
 
   overlay.innerHTML = `
     <div class="modal-box">
@@ -477,7 +551,7 @@ function showModal(correct, accused, culprit, result) {
         <p><strong>Secret:</strong> ${culprit.secrets[0]?.text || "N/A"}</p>
         <p><strong>Questions asked:</strong> ${store.caseData.questionCount}</p>
       </div>
-      <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">Close</button>
+      <button class="btn btn-cta" onclick="this.closest('.modal-overlay').remove()">Close</button>
       <button class="btn btn-outline" style="margin-top:.5rem;width:100%" onclick="this.closest('.modal-overlay').remove();" id="modal-new-case">New Case</button>
     </div>
   `;
