@@ -4,9 +4,10 @@
 
 const SOUNDS = {};
 
+const cfg = typeof window !== 'undefined' ? (window.CRIME_SCENE_CONFIG || {}) : {};
 const BG_SOUNDS = {
-  'bg-menu':    'assets/sounds/bg-menu.mp3',
-  'bg-loading': 'assets/sounds/bg-loading.mp3',
+  'bg-menu':    cfg.bgMenuUrl    || 'assets/sounds/bg-menu.mp3',
+  'bg-loading': cfg.bgLoadingUrl || 'assets/sounds/bg-loading.mp3',
 };
 
 // Volume levels cycled by the sound button: full → low → mute → full
