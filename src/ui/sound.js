@@ -17,15 +17,21 @@ const STORAGE_KEY = 'crime-scene-muted';
 class SoundManager {
   constructor() {
     this._cache = {};
+    this._failed = new Set();
     this._muted = localStorage.getItem(STORAGE_KEY) === '1';
   }
 
   _getAudio(name) {
+    if (this._failed.has(name)) return null;
     if (this._cache[name]) return this._cache[name];
     const path = SOUNDS[name];
     if (!path) return null;
     const audio = new Audio(path);
     audio.preload = 'auto';
+    audio.addEventListener('error', () => {
+      this._failed.add(name);
+      delete this._cache[name];
+    }, { once: true });
     this._cache[name] = audio;
     return audio;
   }

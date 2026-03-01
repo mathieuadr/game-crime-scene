@@ -8,8 +8,8 @@ import { store } from '../store.js';
 import { hashString } from '../utils.js';
 import { TIME_LABELS, TIME_DESCRIPTIONS, AVATAR_COLORS } from '../data.js';
 import { checkConsistency, evaluateAccusation } from '../engine.js';
-import { getConfig, isLLMEnabled, isImageEnabled, isVoiceEnabled, isConversationEnabled, generateImage, playSuspectVoice, stopVoice, clearVoiceAssignments, isSTTSupported, isSTTActive, startSTT, stopSTT, getVoiceIdForSuspect } from '../services.js';
-import { startSuspectSession, endCurrentSession, sendTextInput, isActive as isConversationActive } from '../conversation.js';
+import { getConfig, isLLMEnabled, isImageEnabled, isVoiceEnabled, generateImage, playSuspectVoice, stopVoice, clearVoiceAssignments, isSTTSupported, getVoiceIdForSuspect } from '../services.js';
+import { startSuspectSession, endCurrentSession, isActive as isConversationActive } from '../conversation.js';
 import { $, show, hide, setText, escapeHtml, addChatBubble, addTypingIndicator, removeTypingIndicator, addNote } from './helpers.js';
 import { showSetupScreen } from './setup.js';
 import { soundManager } from './sound.js';
@@ -95,11 +95,11 @@ function wireGameButtons() {
     });
   }
 
+  // ── Talk button: start/stop ElevenLabs real-time session ──
   const talkBtn = $("btn-talk");
   if (talkBtn) {
-    if (!isConversationEnabled()) {
-      talkBtn.style.display = "none";
-    } else {
+    if (isVoiceEnabled()) {
+      talkBtn.style.display = "";
       talkBtn.addEventListener("click", async () => {
         if (!store.selectedSuspect) {
           addChatBubble("system", "Select a suspect first.");
@@ -109,65 +109,49 @@ function wireGameButtons() {
         if (isConversationActive()) {
           talkBtn.disabled = true;
           await endCurrentSession();
-          // button state reset happens via conversation:disconnected event
           talkBtn.disabled = false;
-        } else {
-          setTalkButtonState("connecting");
-          talkBtn.disabled = true;
-          const suspect = store.selectedSuspect;
-          const agent   = store.selectedAgent;
-          const { conversation } = getConfig();
-          try {
-            const systemPrompt = agent.buildSystemPrompt();
-            const voiceId      = isVoiceEnabled() ? await getVoiceIdForSuspect(suspect) : null;
-            await startSuspectSession(suspect, systemPrompt, voiceId, conversation.agentId);
-            // button state set to "active" via conversation:connected event
-          } catch (err) {
-            addChatBubble("system", `Voice session failed: ${err.message}`);
-            setTalkButtonState("idle");
-          } finally {
-            talkBtn.disabled = false;
-          }
+          return;
+        }
+
+        const suspect  = store.selectedSuspect;
+        const agent    = store.selectedAgent;
+        const { conversation } = getConfig();
+
+        if (!conversation.agentId) {
+          addChatBubble("system", "No ElevenLabs agent configured — add elevenLabsAgentId to config.js.");
+          return;
+        }
+
+        // Check microphone permission explicitly before anything else
+        try {
+          const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+          s.getTracks().forEach(t => t.stop());
+        } catch (micErr) {
+          addChatBubble("system", `Microphone access denied — please allow your browser to use the mic and try again. (${micErr.message})`);
+          return;
+        }
+
+        setTalkButtonState("connecting");
+        talkBtn.disabled = true;
+        try {
+          const systemPrompt = agent.buildSystemPrompt();
+          const voiceId      = await getVoiceIdForSuspect(suspect);
+          await startSuspectSession(suspect, systemPrompt, voiceId, conversation.agentId);
+        } catch (err) {
+          addChatBubble("system", `Voice session failed: ${err.message}`);
+          setTalkButtonState("idle");
+        } finally {
+          talkBtn.disabled = false;
         }
       });
-    }
-  }
-
-  const micBtn = $("btn-mic");
-  if (micBtn) {
-    if (!isSTTSupported()) {
-      micBtn.style.display = "none";
     } else {
-      micBtn.addEventListener("click", () => {
-        if (isConversationActive()) return; // mic managed by ElevenLabs in conversation mode
-        toggleMic();
-      });
+      talkBtn.style.display = "none";
     }
   }
 
-  events.on("stt:start", () => {
-    const btn = $("btn-mic");
-    if (btn) btn.classList.add("active");
-  });
-
-  events.on("stt:result", ({ transcript, isFinal }) => {
-    const input = $("chat-input");
-    input.value = transcript;
-    if (isFinal) {
-      const btn = $("btn-mic");
-      if (btn) btn.classList.remove("active");
-    }
-  });
-
-  events.on("stt:end", () => {
-    const btn = $("btn-mic");
-    if (btn) btn.classList.remove("active");
-  });
-
-  events.on("stt:error", () => {
-    const btn = $("btn-mic");
-    if (btn) btn.classList.remove("active");
-  });
+  // Mic button hidden — ElevenLabs manages the mic during a session
+  const micBtn = $("btn-mic");
+  if (micBtn) micBtn.style.display = "none";
 
   // Wire mute button in game header
   const muteBtn = $("btn-mute");
@@ -184,14 +168,6 @@ function wireGameButtons() {
   }
 }
 
-function toggleMic() {
-  if (isSTTActive()) {
-    stopSTT();
-  } else {
-    startSTT();
-  }
-}
-
 function sendFromButton(text) {
   const input = $("chat-input");
   input.value = text;
@@ -201,9 +177,8 @@ function sendFromButton(text) {
 // ─── Game Started ───────────────────────────────────────────
 
 function onGameStarted({ caseData, suspects }) {
-  const apiConfig = getConfig();
   const isAiStory = String(caseData.seed).startsWith("ai_");
-  const mode = isAiStory ? "AI Story" : (apiConfig.llm.enabled ? "AI Agents" : "Classic");
+  const mode = isAiStory ? "AI Story" : (isLLMEnabled() ? "AI Agents" : "Classic");
   setText("header-case-info", `Case #${String(Math.abs(hashString(String(caseData.seed)))).slice(0, 6)} — ${mode}`);
 
   setText("case-victim", `${caseData.victim.name} (${caseData.victim.occupation}, ${caseData.victim.age})`);
@@ -245,7 +220,7 @@ function renderServiceIndicators() {
   if (isLLMEnabled())           badges.push('<span class="service-indicator si-llm"   title="LLM active">AI</span>');
   if (isImageEnabled())         badges.push('<span class="service-indicator si-image" title="Image generation active">IMG</span>');
   if (isVoiceEnabled())         badges.push('<span class="service-indicator si-voice" title="Voice active (auto-matched per suspect)">VOX</span>');
-  if (isConversationEnabled())  badges.push('<span class="service-indicator si-conv"  title="Live Voice conversation available">LIVE</span>');
+  if (isVoiceEnabled())         badges.push('<span class="service-indicator si-conv"  title="ElevenLabs agents — Talk button active">LIVE</span>');
   if (isSTTSupported())         badges.push('<span class="service-indicator si-stt"   title="Speech-to-Text available">MIC</span>');
   container.innerHTML = badges.join("");
 }
@@ -473,7 +448,9 @@ function buildSuspectIntro(suspect) {
   return `Now interrogating ${suspect.name} — ${descParts.join(" ")}`;
 }
 
-async function onSuspectSelected({ suspectId, suspect }) {
+function onSuspectSelected({ suspectId, suspect }) {
+  if (isConversationActive()) endCurrentSession();
+
   renderSuspectList();
   updateSuspectState();
   addChatBubble("system", buildSuspectIntro(suspect));
@@ -482,16 +459,6 @@ async function onSuspectSelected({ suspectId, suspect }) {
 
   if (isImageEnabled() && !store.assets.suspectPortraits[suspectId]) {
     generateSuspectPortrait(suspect);
-  }
-
-  // End any session from the previous suspect, reset Talk button for new suspect
-  if (isConversationActive()) {
-    await endCurrentSession();
-  }
-  if (isConversationEnabled()) {
-    const talkBtn = $("btn-talk");
-    if (talkBtn) talkBtn.style.display = "";  // make visible
-    setTalkButtonState("idle");
   }
 }
 
@@ -558,17 +525,6 @@ async function handleSendMessage() {
 
   const agent = store.selectedAgent;
 
-  // ── Live voice mode: inject text into the active WebSocket session ──
-  if (isConversationActive()) {
-    addChatBubble("question", msg);
-    sendTextInput(msg);
-    // Response arrives via conversation:message event — no further handling here
-    input.disabled = false;
-    $("btn-send").disabled = false;
-    input.focus();
-    return;
-  }
-
   const typingId = addTypingIndicator(suspect.name);
 
   try {
@@ -586,10 +542,7 @@ async function handleSendMessage() {
       await typewriterChat(contentEl, result.text, { speed: 20, soundEvery: 4 });
     }
 
-    if (isVoiceEnabled() && isAutoVoiceOn()) {
-      appendVoiceButton(bubbleEl, result.text, suspect);
-      playSuspectVoice(result.text, suspect);
-    } else if (isVoiceEnabled()) {
+    if (isVoiceEnabled()) {
       appendVoiceButton(bubbleEl, result.text, suspect);
     }
 
@@ -610,26 +563,21 @@ async function handleSendMessage() {
   updateSuspectState();
 }
 
-function isAutoVoiceOn() {
-  const toggle = $("btn-voice-toggle");
-  return toggle && toggle.classList.contains("active");
-}
-
 // ─── Talk Button State ──────────────────────────────────────
 
 function setTalkButtonState(state) {
   const btn = $("btn-talk");
   if (!btn || btn.style.display === "none") return;
 
+  btn.classList.remove("active", "btn-danger");
   switch (state) {
     case "idle":
       btn.innerHTML = "&#127900; Talk";
-      btn.classList.remove("active", "btn-danger");
-      btn.title = "Start real-time voice conversation with this suspect";
+      btn.title = "Start voice conversation with this suspect";
       break;
     case "connecting":
       btn.innerHTML = "Connecting...";
-      btn.classList.remove("active", "btn-danger");
+      btn.title = "Connecting to ElevenLabs...";
       break;
     case "active":
       btn.innerHTML = "&#9209; End";
@@ -654,7 +602,6 @@ function wireConversationEvents() {
       return;
     }
 
-    // AI response
     if (agent && suspect) {
       agent.updatePressure(_lastUserText);
       agent.updateEmotionalState(_lastUserText);
@@ -679,29 +626,33 @@ function wireConversationEvents() {
 
   events.on('conversation:connected', ({ suspectId }) => {
     const name = store.suspects.find(s => s.id === suspectId)?.name || "suspect";
-    addChatBubble("system", `Voice session active — speak to interrogate ${name}.`);
+    addChatBubble("system", `&#127908; Voice session active — speak to interrogate ${name}.`);
     setTalkButtonState("active");
-    const micBtn = $("btn-mic");
-    if (micBtn) { micBtn.classList.add("active"); micBtn.title = "Listening..."; }
+    $("chat-input").disabled = true;
+    $("btn-send").disabled = true;
   });
 
-  events.on('conversation:disconnected', () => {
-    addChatBubble("system", "Voice session ended.");
-    setTalkButtonState("idle");
-    const micBtn = $("btn-mic");
-    if (micBtn) { micBtn.classList.remove("active"); micBtn.title = "Speech-to-Text"; }
-  });
-
-  events.on('conversation:mode', ({ mode }) => {
-    const micBtn = $("btn-mic");
-    if (!micBtn) return;
-    if (mode === 'speaking') {
-      micBtn.classList.remove("active");
-      micBtn.title = "Suspect is speaking...";
-    } else {
-      micBtn.classList.add("active");
-      micBtn.title = "Listening — speak now";
+  events.on('conversation:disconnected', ({ details } = {}) => {
+    let msg = "Voice session ended.";
+    if (details && typeof details === 'object') {
+      const reason = details.reason || details.code || details.message;
+      if (reason) msg += ` (${reason})`;
     }
+    addChatBubble("system", msg);
+    setTalkButtonState("idle");
+    $("chat-input").disabled = false;
+    $("btn-send").disabled = false;
+  });
+
+  events.on('conversation:mode', ({ mode, suspectId }) => {
+    const btn = $("btn-talk");
+    if (!btn) return;
+    if (mode === 'speaking') {
+      btn.innerHTML = "&#128264; Speaking...";
+    } else if (mode === 'listening') {
+      btn.innerHTML = "&#127908; Listening...";
+    }
+    btn.classList.add("active");
   });
 
   events.on('conversation:error', ({ error, suspectId }) => {
@@ -709,6 +660,18 @@ function wireConversationEvents() {
     const msg  = typeof error === "string" ? error : (error?.message || JSON.stringify(error));
     addChatBubble("system", `Voice session error (${name}): ${msg}`);
     setTalkButtonState("idle");
+    $("chat-input").disabled = false;
+    $("btn-send").disabled = false;
+  });
+
+  // Update Talk button state when an agent becomes ready
+  events.on('elevenlabs:agent_ready', ({ suspectId }) => {
+    if (store.selectedSuspectId === suspectId) {
+      const btn = $("btn-talk");
+      if (btn && !isConversationActive()) {
+        btn.title = "Start voice conversation with this suspect";
+      }
+    }
   });
 }
 

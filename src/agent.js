@@ -6,7 +6,7 @@
 
 import { pick, clamp } from './utils.js';
 import { LOCATIONS, TIME_LABELS, TIME_DESCRIPTIONS } from './data.js';
-import { chatCompletion, isLLMEnabled } from './services.js';
+import { chatCompletion, chatCompletionStream, isLLMEnabled } from './services.js';
 import { events } from './events.js';
 
 export class SuspectAgent {
@@ -165,6 +165,52 @@ ${culpritBlock}
     });
 
     return response;
+  }
+
+  // ── Streaming Response (voice mode) ──
+
+  async respondStream(userMessage, onChunk) {
+    this.updatePressure(userMessage);
+    this.profile.dialogue_policy.memory.last_questions.push(userMessage);
+
+    const systemPrompt = this.buildSystemPrompt();
+    const messages = [
+      { role: "system", content: systemPrompt },
+      ...this.conversationHistory,
+      { role: "user", content: userMessage },
+    ];
+
+    let fullText = "";
+    try {
+      if (isLLMEnabled()) {
+        fullText = await chatCompletionStream(messages, { maxTokens: 300, temperature: 0.8 }, onChunk);
+      } else {
+        const fallback = this.fallbackRespond(userMessage);
+        fullText = fallback.text;
+        if (onChunk) onChunk(fullText, fullText);
+      }
+    } catch (err) {
+      console.error("LLM stream error:", err);
+      const fallback = this.fallbackRespond(userMessage);
+      fullText = fallback.text;
+      if (onChunk) onChunk(fullText, fullText);
+    }
+
+    this.conversationHistory.push({ role: "user", content: userMessage });
+    this.conversationHistory.push({ role: "assistant", content: fullText });
+    this.updateEmotionalState(userMessage);
+    this.caseData.questionCount++;
+
+    const clueData = this.analyzeResponse(userMessage, fullText);
+    events.emit("suspect:response", {
+      suspectId: this.profile.id,
+      suspect: this.profile,
+      text: fullText,
+      isLLM: true,
+      clueData,
+    });
+
+    return { text: fullText, tag: clueData?.tag || "info", clueData, isLLM: true };
   }
 
   // ── LLM Response ──

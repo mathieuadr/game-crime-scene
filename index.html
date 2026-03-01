@@ -40,9 +40,8 @@
 
   <!-- ═══ SETUP SCREEN ═══ -->
   <div id="setup-screen">
-    <!-- Video background (user places video in assets/videos/bg-loop.mp4) -->
     <video class="bg-video" autoplay loop muted playsinline>
-      <source src="assets/videos/bg-loop.mp4" type="video/mp4">
+      <source src="assets/videos/background.mp4" type="video/mp4">
     </video>
     <div class="bg-video-overlay"></div>
 
@@ -102,7 +101,7 @@
   <!-- ═══ GAME SCREEN ═══ -->
   <div id="game-screen">
     <video class="bg-video game-bg-video" autoplay loop muted playsinline>
-      <source src="assets/videos/bg-loop.mp4" type="video/mp4">
+      <source src="assets/videos/background.mp4" type="video/mp4">
     </video>
     <div class="bg-video-overlay game-overlay"></div>
     <div class="game-layout">
@@ -113,7 +112,7 @@
         <div class="header-actions">
           <span id="active-services"></span>
           <button class="btn-mute" id="btn-mute" title="Toggle sound effects">&#128264;</button>
-          <button class="btn btn-sm btn-outline" id="btn-voice-toggle" title="Toggle auto-voice">Voice</button>
+          <button class="btn btn-sm btn-outline" id="btn-voice-toggle" title="Toggle auto-voice" style="display:none">Voice</button>
           <button class="btn btn-sm btn-outline" id="btn-debug-toggle">Debug</button>
           <button class="btn btn-sm btn-outline" id="btn-new-case">New Case</button>
         </div>

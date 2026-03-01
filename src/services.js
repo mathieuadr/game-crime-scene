@@ -61,6 +61,62 @@ function getLLMBaseUrl(llm) {
   return urls[llm.provider] || llm.baseUrl || "https://api.openai.com/v1";
 }
 
+export async function chatCompletionStream(messages, opts = {}, onChunk) {
+  const { llm } = getConfig();
+  if (!llm.apiKey) throw new Error("API key required for LLM.");
+
+  const baseUrl = getLLMBaseUrl(llm);
+  const headers = { "Content-Type": "application/json" };
+  if (llm.apiKey) headers["Authorization"] = `Bearer ${llm.apiKey}`;
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: llm.model,
+      messages,
+      max_tokens: opts.maxTokens || 300,
+      temperature: opts.temperature || 0.8,
+      stream: true,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`LLM API error ${res.status}: ${err}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let fullText = "";
+  let remainder = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const raw = remainder + decoder.decode(value, { stream: true });
+    const lines = raw.split("\n");
+    remainder = lines.pop();
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6).trim();
+      if (data === "[DONE]") continue;
+      try {
+        const parsed = JSON.parse(data);
+        const chunk = parsed.choices?.[0]?.delta?.content || "";
+        if (chunk) {
+          fullText += chunk;
+          if (onChunk) onChunk(chunk, fullText);
+        }
+      } catch (_) {}
+    }
+  }
+
+  return fullText;
+}
+
 export async function chatCompletion(messages, opts = {}) {
   const { llm } = getConfig();
   if (!llm.apiKey) throw new Error("API key required for LLM.");
@@ -340,6 +396,84 @@ export function isSTTSupported() {
   return !!SpeechRecognition;
 }
 
+// ─── Voice Stream Player ────────────────────────────────────
+// Sentence-chunked TTS: starts playing the first sentence while
+// subsequent sentences are still being fetched/generated.
+
+// VoiceStreamPlayer — collects the full streamed text, then fires
+// a single TTS request with optimize_streaming_latency: 4.
+// This avoids rate-limit errors from many parallel sentence requests
+// while still starting playback as soon as the LLM is done.
+export class VoiceStreamPlayer {
+  constructor() {
+    this._text = "";
+    this._voiceId = null;
+    this._audio = null;
+    this._onComplete = null;
+    this._stopped = false;
+  }
+
+  setVoiceId(id) { this._voiceId = id; }
+
+  pushText(chunk) {
+    this._text += chunk;
+  }
+
+  async finalize() {
+    if (this._stopped || !this._text.trim() || !this._voiceId) {
+      if (this._onComplete) this._onComplete();
+      return;
+    }
+
+    const { voice } = getConfig();
+    if (!voice.enabled) { if (this._onComplete) this._onComplete(); return; }
+
+    try {
+      const res = await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${this._voiceId}/stream`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "xi-api-key": voice.apiKey },
+          body: JSON.stringify({
+            text: this._text.trim(),
+            model_id: voice.model,
+            optimize_streaming_latency: 4,
+            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+          }),
+        }
+      );
+
+      if (!res.ok || this._stopped) { if (this._onComplete) this._onComplete(); return; }
+
+      const blob = await res.blob();
+      if (this._stopped) { if (this._onComplete) this._onComplete(); return; }
+
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      this._audio = audio;
+
+      await new Promise(resolve => {
+        audio.addEventListener("ended", resolve, { once: true });
+        audio.addEventListener("error", resolve, { once: true });
+        audio.play().catch(resolve);
+      });
+
+      URL.revokeObjectURL(url);
+    } catch (_) {}
+
+    this._audio = null;
+    if (this._onComplete) this._onComplete();
+  }
+
+  onComplete(fn) { this._onComplete = fn; }
+
+  stop() {
+    this._stopped = true;
+    if (this._audio) { this._audio.pause(); this._audio = null; }
+    this._onComplete = null;
+  }
+}
+
 export function isSTTActive() {
   return _sttActive;
 }
@@ -390,4 +524,82 @@ export function stopSTT() {
     _recognition = null;
     _sttActive = false;
   }
+}
+
+// ─── ElevenLabs Conversational AI — Agent Management ────────
+
+const CONVAI_BASE = "https://api.elevenlabs.io/v1/convai/agents";
+
+const FIRST_MESSAGES = {
+  calm:       "Inspector. I'll answer your questions.",
+  nervous:    "I— I've been waiting. What do you want to know?",
+  arrogant:   "I hope this won't take long, Inspector.",
+  shy:        "...Hello, Inspector.",
+  aggressive: "Let's get this over with.",
+  friendly:   "Inspector! I want to help however I can.",
+};
+
+/**
+ * Create a dedicated ElevenLabs Conversational AI agent for a suspect.
+ * The agent embeds the full character context so no system-prompt
+ * override is needed at session time.
+ */
+export async function createElevenLabsAgent(suspect, systemPrompt, voiceId) {
+  const { voice } = getConfig();
+  if (!voice.apiKey) return null;
+
+  const payload = {
+    name: `CrimeScene_${suspect.id}`,
+    conversation_config: {
+      agent: {
+        prompt:        { prompt: systemPrompt },
+        first_message: FIRST_MESSAGES[suspect.personality?.trait] ?? "Inspector. I'm ready.",
+        language:      "en",
+        llm:           "gpt-4o-mini",
+      },
+      tts: voiceId ? { voice_id: voiceId } : undefined,
+    },
+  };
+
+  try {
+    const res = await fetch(CONVAI_BASE, {
+      method:  "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "xi-api-key":   voice.apiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      console.warn(`[EL Agent] Failed to create agent for ${suspect.name}:`, res.status, await res.text());
+      return null;
+    }
+
+    const data = await res.json();
+    console.log(`[EL Agent] Created agent ${data.agent_id} for ${suspect.name}`);
+    return data.agent_id;
+  } catch (err) {
+    console.warn(`[EL Agent] Error creating agent for ${suspect.name}:`, err);
+    return null;
+  }
+}
+
+/**
+ * Delete a list of ElevenLabs agents (cleanup between games).
+ */
+export async function deleteElevenLabsAgents(agentIds) {
+  const { voice } = getConfig();
+  if (!voice.apiKey || !agentIds?.length) return;
+
+  await Promise.allSettled(
+    agentIds.map(id =>
+      fetch(`${CONVAI_BASE}/${id}`, {
+        method:  "DELETE",
+        headers: { "xi-api-key": voice.apiKey },
+      }).then(r => {
+        if (r.ok) console.log(`[EL Agent] Deleted agent ${id}`);
+      }).catch(() => {})
+    )
+  );
 }

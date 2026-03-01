@@ -14,6 +14,7 @@ class GameStore {
     this.caseData = null;
     this.suspects = [];
     this.agents = {};
+    this.elevenlabsAgentIds = {};   // suspectId → ElevenLabs agent ID
     this.selectedSuspectId = null;
     this.notes = [];
     this.storyMode = "classic";

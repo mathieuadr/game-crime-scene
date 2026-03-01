@@ -31,12 +31,13 @@ let _connecting = false;
 
 /**
  * Start a real-time voice session for a suspect.
- * Any previously active session is closed first.
+ * Uses the base agent ID from config and overrides system prompt + voice
+ * per suspect at session time — no agent creation API needed.
  *
  * @param {object}      suspect      - Suspect profile from game data
- * @param {string}      systemPrompt - From SuspectAgent.buildSystemPrompt()
+ * @param {string}      systemPrompt - Full character context
  * @param {string|null} voiceId      - ElevenLabs voice ID for this suspect
- * @param {string}      agentId      - ElevenLabs Conversational AI agent ID
+ * @param {string}      agentId      - Base ElevenLabs agent ID (from config)
  */
 export async function startSuspectSession(suspect, systemPrompt, voiceId, agentId) {
   if (_connecting) return;
@@ -44,6 +45,11 @@ export async function startSuspectSession(suspect, systemPrompt, voiceId, agentI
 
   try {
     await endCurrentSession();
+
+    // Explicitly request microphone before the SDK does, so the browser
+    // shows the permission dialog and we can catch a clear denial error.
+    const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micStream.getTracks().forEach(t => t.stop());
 
     const Conversation = await loadSDK();
 
@@ -58,13 +64,15 @@ export async function startSuspectSession(suspect, systemPrompt, voiceId, agentI
       },
 
       onConnect: ({ conversationId }) => {
+        console.log('[Conversation] Connected. ID:', conversationId);
         events.emit('conversation:connected', { conversationId, suspectId: suspect.id });
       },
 
-      onDisconnect: () => {
+      onDisconnect: (details) => {
+        console.warn('[Conversation] Disconnected.', details ?? '');
         _session   = null;
         _suspectId = null;
-        events.emit('conversation:disconnected', { suspectId: suspect.id });
+        events.emit('conversation:disconnected', { suspectId: suspect.id, details });
       },
 
       onMessage: ({ message, source }) => {
@@ -78,6 +86,7 @@ export async function startSuspectSession(suspect, systemPrompt, voiceId, agentI
       },
 
       onStatusChange: ({ status }) => {
+        console.log('[Conversation] Status:', status);
         events.emit('conversation:status', { status, suspectId: suspect.id });
       },
 
