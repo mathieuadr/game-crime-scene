@@ -21,6 +21,8 @@ export function initSetupScreen() {
   wireMuteToggle();
   animateTitle();
   soundManager.preloadAll();
+
+  document.addEventListener('click', () => soundManager.playBg('bg-menu'), { once: true });
 }
 
 function wireMuteToggle() {
@@ -120,18 +122,21 @@ async function startGame() {
     const statusEl = $("loading-status");
     show(overlay, "flex");
     $("btn-start").disabled = true;
+    soundManager.playBg('bg-loading');
 
     try {
       result = await generateCaseAI(count, theme, (msg) => { statusEl.textContent = msg; });
     } catch (err) {
       hide(overlay);
       $("btn-start").disabled = false;
+      soundManager.playBg('bg-menu');
       alert("AI generation failed: " + err.message);
       return;
     }
 
     hide(overlay);
     $("btn-start").disabled = false;
+    soundManager.playBg('bg-menu');
   } else {
     result = generateCase(seed, count);
   }
@@ -160,6 +165,7 @@ export function showSetupScreen() {
   const setupEl = $("setup-screen");
   const gameEl = $("game-screen");
 
+  soundManager.playBg('bg-menu');
   show(setupEl, "flex");
   hide(gameEl);
   hide("interrogation-controls");

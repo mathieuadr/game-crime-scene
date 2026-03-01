@@ -91,6 +91,10 @@
 
   <!-- ═══ LOADING OVERLAY (AI generation) ═══ -->
   <div id="loading-overlay" style="display:none">
+    <video class="bg-video loading-bg-video" autoplay loop muted playsinline>
+      <source src="assets/videos/loading.mp4" type="video/mp4">
+    </video>
+    <div class="loading-overlay-bg"></div>
     <div class="loading-box">
       <div class="loading-spinner"></div>
       <h3>Generating story...</h3>
@@ -127,23 +131,31 @@
         <div class="suspect-state-panel" id="suspect-state"></div>
       </div>
 
-      <!-- Center: Case summary + Interrogation -->
+      <!-- Center: Dossier + Interrogation -->
       <div class="center-col">
 
-        <!-- Case summary -->
-        <div class="panel" style="flex-shrink:0">
-          <div class="panel-title">Case Summary</div>
-          <div class="case-summary-body">
-            <div class="case-fact"><strong>Victim</strong><span id="case-victim">—</span></div>
-            <div class="case-fact"><strong>Time of Death</strong><span id="case-time">—</span></div>
-            <div class="case-fact"><strong>Location</strong><span id="case-location">—</span></div>
-            <div class="case-fact"><strong>Weapon</strong><span id="case-weapon">—</span></div>
-            <ul class="evidence-list" id="evidence-list"></ul>
-          </div>
-          <!-- AI-generated images -->
-          <div class="case-images">
-            <div id="crime-scene-image" class="image-slot"></div>
-            <div id="weapon-image" class="image-slot"></div>
+        <!-- Dossier (Case File — collapsible) -->
+        <div class="dossier-panel" id="dossier-panel">
+          <button class="dossier-tab" id="btn-dossier-toggle" title="Open / close case file">
+            <span class="dossier-folder-icon"></span>
+            <span class="dossier-tab-title">CASE FILE</span>
+            <span class="dossier-tab-id" id="dossier-case-id">——————</span>
+            <span class="dossier-chevron"></span>
+          </button>
+          <div class="dossier-body-wrapper">
+            <div class="dossier-body">
+              <div class="case-summary-body">
+                <div class="case-fact"><strong>Victim</strong><span id="case-victim">—</span></div>
+                <div class="case-fact"><strong>Time of Death</strong><span id="case-time">—</span></div>
+                <div class="case-fact"><strong>Location</strong><span id="case-location">—</span></div>
+                <div class="case-fact"><strong>Weapon</strong><span id="case-weapon">—</span></div>
+                <ul class="evidence-list" id="evidence-list"></ul>
+              </div>
+              <div class="case-images">
+                <div id="crime-scene-image" class="image-slot"></div>
+                <div id="weapon-image" class="image-slot"></div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -154,15 +166,8 @@
           <div class="interrogation-controls" id="interrogation-controls" style="display:none">
             <button class="btn-keycap" id="btn-ask-alibi" title="Ask about their alibi at murder time">Alibi</button>
             <button class="btn-keycap" id="btn-ask-victim" title="Ask about the victim">Victim</button>
-
             <select id="select-about-suspect" title="Choose a suspect to ask about"></select>
             <button class="btn-keycap" id="btn-ask-about" title="Ask about another suspect">Ask about</button>
-
-            <select id="select-time" title="Choose a time period"></select>
-            <button class="btn-keycap" id="btn-ask-time" title="Ask where they were at this time">Where?</button>
-
-            <button class="btn-keycap" id="btn-ask-shoes" title="Ask their shoe size">Shoes</button>
-            <button class="btn-keycap" id="btn-ask-item" title="Ask about their personal item">Item</button>
             <button class="btn-keycap btn-confront" id="btn-ask-confront" title="Confront with evidence">Confront</button>
             <button class="btn-keycap btn-pressure" id="btn-ask-secret" title="Pressure for secrets">Pressure</button>
           </div>

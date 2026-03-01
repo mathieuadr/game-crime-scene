@@ -44,16 +44,6 @@ function wireGameButtons() {
     const target = store.suspects.find(s => s.id === sel.value);
     if (target) sendFromButton(`What can you tell me about ${target.name}? Did you see them that evening?`);
   });
-  $("btn-ask-time").addEventListener("click", () => {
-    const t = $("select-time").value;
-    sendFromButton(`Where were you at ${TIME_LABELS[t]} (${TIME_DESCRIPTIONS[t]})?`);
-  });
-  $("btn-ask-shoes").addEventListener("click", () =>
-    sendFromButton("What is your shoe size?"));
-  $("btn-ask-item").addEventListener("click", () => {
-    const s = store.selectedSuspect;
-    if (s) sendFromButton(`Do you have your ${s.physical.personalItem} with you?`);
-  });
 
   $("btn-ask-confront").addEventListener("click", () => {
     soundManager.play('key-click');
@@ -153,17 +143,22 @@ function wireGameButtons() {
   const micBtn = $("btn-mic");
   if (micBtn) micBtn.style.display = "none";
 
-  // Wire mute button in game header
+  // Wire volume button in game header (cycles Full → Low → Mute)
   const muteBtn = $("btn-mute");
   if (muteBtn) {
-    if (soundManager.isMuted()) {
-      muteBtn.classList.add('muted');
-      muteBtn.innerHTML = '&#128263;';
-    }
+    muteBtn.innerHTML = soundManager.currentVolumeLevel().icon;
     muteBtn.addEventListener("click", () => {
-      const muted = soundManager.toggleMute();
-      muteBtn.classList.toggle('muted', muted);
-      muteBtn.innerHTML = muted ? '&#128263;' : '&#128264;';
+      const level = soundManager.cycleVolume();
+      muteBtn.innerHTML = level.icon;
+    });
+  }
+
+  // Wire dossier toggle
+  const dossierBtn = $("btn-dossier-toggle");
+  const dossierPanel = $("dossier-panel");
+  if (dossierBtn && dossierPanel) {
+    dossierBtn.addEventListener("click", () => {
+      dossierPanel.classList.toggle("open");
     });
   }
 }
@@ -179,7 +174,13 @@ function sendFromButton(text) {
 function onGameStarted({ caseData, suspects }) {
   const isAiStory = String(caseData.seed).startsWith("ai_");
   const mode = isAiStory ? "AI Story" : (isLLMEnabled() ? "AI Agents" : "Classic");
-  setText("header-case-info", `Case #${String(Math.abs(hashString(String(caseData.seed)))).slice(0, 6)} — ${mode}`);
+  const caseNum = String(Math.abs(hashString(String(caseData.seed)))).slice(0, 6);
+  setText("header-case-info", `Case #${caseNum} — ${mode}`);
+  setText("dossier-case-id", `#${caseNum} — ${caseData.victim.name}`);
+
+  // Start dossier closed
+  const dossierPanel = $("dossier-panel");
+  if (dossierPanel) dossierPanel.classList.remove("open");
 
   setText("case-victim", `${caseData.victim.name} (${caseData.victim.occupation}, ${caseData.victim.age})`);
   setText("case-time", caseData.crime.time);
@@ -208,6 +209,7 @@ function onGameStarted({ caseData, suspects }) {
     suspects.forEach(s => generateSuspectPortrait(s));
   }
 
+  soundManager.stopBg();
   renderServiceIndicators();
 }
 
@@ -215,14 +217,7 @@ function onGameStarted({ caseData, suspects }) {
 
 function renderServiceIndicators() {
   const container = $("active-services");
-  if (!container) return;
-  const badges = [];
-  if (isLLMEnabled())           badges.push('<span class="service-indicator si-llm"   title="LLM active">AI</span>');
-  if (isImageEnabled())         badges.push('<span class="service-indicator si-image" title="Image generation active">IMG</span>');
-  if (isVoiceEnabled())         badges.push('<span class="service-indicator si-voice" title="Voice active (auto-matched per suspect)">VOX</span>');
-  if (isVoiceEnabled())         badges.push('<span class="service-indicator si-conv"  title="ElevenLabs agents — Talk button active">LIVE</span>');
-  if (isSTTSupported())         badges.push('<span class="service-indicator si-stt"   title="Speech-to-Text available">MIC</span>');
-  container.innerHTML = badges.join("");
+  if (container) container.innerHTML = "";
 }
 
 // ─── Image Generation ───────────────────────────────────────
@@ -451,6 +446,10 @@ function buildSuspectIntro(suspect) {
 function onSuspectSelected({ suspectId, suspect }) {
   if (isConversationActive()) endCurrentSession();
 
+  // Close the dossier when entering interrogation
+  const dossierPanel = $("dossier-panel");
+  if (dossierPanel) dossierPanel.classList.remove("open");
+
   renderSuspectList();
   updateSuspectState();
   addChatBubble("system", buildSuspectIntro(suspect));
@@ -493,14 +492,6 @@ function populateDropdowns() {
     opt.value = s.id; opt.textContent = s.name;
     aboutSelect.appendChild(opt);
   });
-
-  const timeSelect = $("select-time");
-  timeSelect.innerHTML = "";
-  for (const [key, label] of Object.entries(TIME_LABELS)) {
-    const opt = document.createElement("option");
-    opt.value = key; opt.textContent = `${label} (${TIME_DESCRIPTIONS[key]})`;
-    timeSelect.appendChild(opt);
-  }
 
 }
 
